@@ -72,7 +72,15 @@ const towerEl = $<HTMLDivElement>('tower');
 const towerScroll = $<HTMLDivElement>('tower-scroll');
 const dailyBtn = $<HTMLButtonElement>('daily-btn');
 const dailyMeta = $<HTMLParagraphElement>('daily-meta');
-const achStrip = $<HTMLDivElement>('ach-strip');
+const mapAchBtn = $<HTMLButtonElement>('map-ach-btn');
+
+// Achievements page
+const screenAchievements = $<HTMLDivElement>('screen-achievements');
+const achList = $<HTMLDivElement>('ach-list');
+const achEarnedN = $<HTMLSpanElement>('ach-earned-n');
+const achTotalN = $<HTMLSpanElement>('ach-total-n');
+const achBackBtn = $<HTMLButtonElement>('ach-back-btn');
+const homeAchBtn = $<HTMLButtonElement>('home-ach-btn');
 
 const backBtn = $<HTMLButtonElement>('back-btn');
 const restartBtn = $<HTMLButtonElement>('restart-btn');
@@ -180,7 +188,9 @@ const WIN_FLAVOR = [
 // ---------------------------------------------------------------------------
 
 function showScreen(el: HTMLDivElement): void {
-  for (const s of [screenLoading, screenHome, screenMap, screenPlay]) s.hidden = s !== el;
+  for (const s of [screenLoading, screenHome, screenMap, screenAchievements, screenPlay]) {
+    s.hidden = s !== el;
+  }
   // Retrigger the enter transition on every swap.
   el.classList.remove('enter');
   void el.offsetWidth; // reflow so the animation restarts
@@ -341,17 +351,42 @@ function setWallet(el: HTMLSpanElement, value: number): void {
   }
 }
 
-function renderAchievementChips(): void {
+function rewardText(a: (typeof ACHIEVEMENTS)[number]): string {
+  const parts: string[] = [];
+  if (a.reward.freeze) parts.push(`\u2744 +${a.reward.freeze}`);
+  if (a.reward.cutter) parts.push(`\u2702 +${a.reward.cutter}`);
+  return parts.join('  ');
+}
+
+/** Renders the full Achievements page (earned + locked, with rewards). */
+function renderAchievements(): void {
   const owned = new Set(profile.achievements ?? []);
-  achStrip.innerHTML = '';
+  achEarnedN.textContent = String([...owned].filter((id) => getAchievement(id)).length);
+  achTotalN.textContent = String(ACHIEVEMENTS.length);
+  achList.innerHTML = '';
   for (const a of ACHIEVEMENTS) {
     const earned = owned.has(a.id);
-    const chip = document.createElement('span');
-    chip.className = `ach-chip${earned ? ' earned' : ''}`;
-    chip.title = earned ? a.description : `Locked — ${a.description}`;
-    chip.innerHTML = `<span class="ach-chip-badge">${earned ? '\u{1F3C6}' : '\u{1F512}'}</span>${a.name}`;
-    achStrip.appendChild(chip);
+    const row = document.createElement('div');
+    row.className = `ach-row${earned ? ' earned' : ''}`;
+    const reward = rewardText(a);
+    row.innerHTML = `
+      <div class="ach-row-badge">${earned ? '\u{1F3C6}' : '\u{1F512}'}</div>
+      <div class="ach-row-text">
+        <span class="ach-row-name">${a.name}</span>
+        <span class="ach-row-desc">${a.description}</span>
+      </div>
+      <span class="ach-row-reward">${reward}</span>
+    `;
+    achList.appendChild(row);
   }
+}
+
+let achReturnScreen: HTMLDivElement = screenHome;
+
+function openAchievements(from: HTMLDivElement): void {
+  achReturnScreen = from;
+  renderAchievements();
+  showScreen(screenAchievements);
 }
 
 function renderMap(): void {
@@ -359,7 +394,6 @@ function renderMap(): void {
   setWallet(totalTiesEl, profile.zipTies);
   setWallet(totalFreezeEl, profile.tools.freeze);
   setWallet(totalCutterEl, profile.tools.cutter);
-  renderAchievementChips();
   dailyBtn.textContent = dailyDone ? 'Done' : 'Play';
   dailyBtn.disabled = dailyDone;
   dailyMeta.textContent = dailyDone
@@ -1220,6 +1254,22 @@ homeDailyBtn.addEventListener('click', () => {
   if (dailyDone) return;
   audio.play('sfx_ui_tap');
   startDaily();
+});
+
+homeAchBtn.addEventListener('click', () => {
+  audio.play('sfx_ui_tap');
+  openAchievements(screenHome);
+});
+
+mapAchBtn.addEventListener('click', () => {
+  audio.play('sfx_ui_tap');
+  openAchievements(screenMap);
+});
+
+achBackBtn.addEventListener('click', () => {
+  audio.play('sfx_ui_tap');
+  if (achReturnScreen === screenMap) showMap();
+  else showHome();
 });
 
 // ---------------------------------------------------------------------------

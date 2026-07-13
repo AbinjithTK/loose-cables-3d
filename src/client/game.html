@@ -52,6 +52,7 @@
           <div class="home-actions">
             <button id="home-play-btn" class="btn big" type="button">Continue</button>
             <button id="home-daily-btn" class="btn ghost" type="button">Today&apos;s Tangle</button>
+            <button id="home-ach-btn" class="btn ghost" type="button">&#127942; Achievements</button>
           </div>
 
           <p class="home-progress" id="home-progress"></p>
@@ -68,6 +69,7 @@
             <div class="wallet" id="wallet-ties" title="Zip Ties">&#128279; <span id="total-ties">0</span></div>
             <div class="wallet tool" id="wallet-freeze" title="Time Freezes (earned via achievements)">&#10052; <span id="total-freeze">0</span></div>
             <div class="wallet tool" id="wallet-cutter" title="Wire Cutters (earned via achievements)">&#9986; <span id="total-cutter">0</span></div>
+            <button id="map-ach-btn" class="icon-btn" type="button" aria-label="Achievements">&#127942;</button>
             <button id="mute-btn" class="icon-btn" type="button" aria-label="Toggle sound">&#9835;</button>
           </div>
         </header>
@@ -80,11 +82,19 @@
           <button id="daily-btn" class="btn small" type="button">Play</button>
         </div>
 
-        <div class="ach-strip" id="ach-strip" aria-label="Achievements"></div>
-
         <div class="tower-scroll" id="tower-scroll">
           <div class="tower" id="tower"></div>
         </div>
+      </div>
+
+      <!-- ============ ACHIEVEMENTS ============ -->
+      <div id="screen-achievements" class="screen" hidden>
+        <header class="sub-header">
+          <button id="ach-back-btn" class="icon-btn" type="button" aria-label="Back">&#8592;</button>
+          <h1 class="sub-title">Achievements</h1>
+          <div class="ach-count-pill"><span id="ach-earned-n">0</span>/<span id="ach-total-n">0</span></div>
+        </header>
+        <div class="ach-list" id="ach-list"></div>
       </div>
 
       <!-- ============ PLAY ============ -->
