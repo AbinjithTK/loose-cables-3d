@@ -1923,3 +1923,58 @@ button {
 .ach-row:not(.earned) .ach-row-reward {
   color: rgba(242, 240, 247, 0.4);
 }
+
+/* ================================== */
+/* Snoovatar avatars (home + pins)     */
+/* ================================== */
+
+/* Home identity badge shows the full snoovatar. */
+.home-avatar.has-img {
+  background: linear-gradient(180deg, #2a2340, #171225);
+  overflow: hidden;
+  padding: 0;
+}
+
+.home-avatar.has-img img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  object-position: center top;
+}
+
+/* "You" marker (initial fallback) on the road map. */
+.player-pin.you {
+  border-color: var(--gold, #ffc93c);
+  box-shadow: 0 0 0 2px rgba(255, 201, 60, 0.7), 0 2px 6px rgba(0, 0, 0, 0.45);
+  z-index: 2;
+}
+
+/* Avatar-image pins stand as little full-body characters beside the node. */
+.player-pin.has-img,
+.level-row.right .player-pin.has-img {
+  width: 30px;
+  height: 42px;
+  border-radius: 0;
+  border: none;
+  background: transparent !important;
+  box-shadow: none;
+  overflow: visible;
+  align-self: flex-end;
+  margin: 0 1px;
+}
+
+.player-pin.has-img img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  object-position: center bottom;
+  filter: drop-shadow(0 2px 3px rgba(0, 0, 0, 0.55));
+}
+
+.player-pin.you.has-img img {
+  filter: drop-shadow(0 0 5px rgba(255, 201, 60, 0.9)) drop-shadow(0 2px 3px rgba(0, 0, 0, 0.5));
+}
+
+.player-pins {
+  align-items: flex-end;
+}

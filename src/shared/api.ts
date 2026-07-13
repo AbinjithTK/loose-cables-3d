@@ -31,6 +31,8 @@ export type InitResponse = {
   /** ISO date (UTC) of today's daily puzzle. */
   dailyDate: string;
   dailyDone: boolean;
+  /** The current user's Reddit snoovatar URL, or null if they have none. */
+  avatarUrl: string | null;
 };
 
 export type LevelCompleteRequest = {
@@ -93,6 +95,8 @@ export type RosterEntry = {
   /** The level id they're currently sitting on (where they left off), or null if finished. */
   levelId: string | null;
   totalStars: number;
+  /** Their Reddit snoovatar URL, or null if they have none. */
+  avatarUrl: string | null;
 };
 
 export type RosterResponse = {

@@ -78,18 +78,37 @@ function recomputeStars(profile: PlayerProfile): void {
 // ---------------------------------------------------------------------------
 
 const ROSTER_RECENT = 'roster:recent'; // sorted set: member=username, score=lastActive ms
-const ROSTER_POS = 'roster:pos'; // hash: username -> JSON { levelId, totalStars }
+const ROSTER_POS = 'roster:pos'; // hash: username -> JSON { levelId, totalStars, avatarUrl }
+const ROSTER_AVATAR = 'roster:avatar'; // hash: username -> snoovatar url ('' = none)
 const ROSTER_CAP = 200; // keep only the most-recent N players
+
+/**
+ * The user's snoovatar URL, cached in Redis so we only ever hit the Reddit API
+ * once per user (snoovatars rarely change). Empty string = "no avatar".
+ */
+async function getAvatarUrl(username: string): Promise<string | null> {
+  if (username === 'anonymous') return null;
+  try {
+    const cached = await redis.hGet(ROSTER_AVATAR, username);
+    if (cached !== undefined && cached !== null) return cached === '' ? null : cached;
+    const url = (await reddit.getSnoovatarUrl(username)) ?? null;
+    await redis.hSet(ROSTER_AVATAR, { [username]: url ?? '' });
+    return url;
+  } catch {
+    return null;
+  }
+}
 
 /** Upsert a player's public position (their current level) into the roster. */
 async function recordPresence(profile: PlayerProfile): Promise<void> {
   if (profile.username === 'anonymous') return;
   const cleared = new Set(Object.keys(profile.levels));
   const levelId = nextLevelId(cleared, profile.totalStars);
+  const avatarUrl = await getAvatarUrl(profile.username);
   try {
     await redis.zAdd(ROSTER_RECENT, { member: profile.username, score: Date.now() });
     await redis.hSet(ROSTER_POS, {
-      [profile.username]: JSON.stringify({ levelId, totalStars: profile.totalStars }),
+      [profile.username]: JSON.stringify({ levelId, totalStars: profile.totalStars, avatarUrl }),
     });
     // Trim to the most-recent ROSTER_CAP players (lowest scores = oldest).
     const size = await redis.zCard(ROSTER_RECENT);
@@ -119,6 +138,7 @@ api.get('/init', async (c) => {
     const username = await currentUsername();
     const profile = await loadProfile(username);
     await recordPresence(profile);
+    const avatarUrl = await getAvatarUrl(username);
     const dailyDate = todayIso();
     return c.json<InitResponse>({
       type: 'init',
@@ -126,6 +146,7 @@ api.get('/init', async (c) => {
       profile,
       dailyDate,
       dailyDone: profile.lastDaily === dailyDate,
+      avatarUrl,
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : 'init failed';
@@ -338,8 +359,17 @@ api.get('/roster', async (c) => {
       const raw = posRaw?.[name];
       if (!raw) continue;
       try {
-        const pos = JSON.parse(raw) as { levelId: string | null; totalStars: number };
-        players.push({ username: name, levelId: pos.levelId, totalStars: pos.totalStars });
+        const pos = JSON.parse(raw) as {
+          levelId: string | null;
+          totalStars: number;
+          avatarUrl?: string | null;
+        };
+        players.push({
+          username: name,
+          levelId: pos.levelId,
+          totalStars: pos.totalStars,
+          avatarUrl: pos.avatarUrl ?? null,
+        });
       } catch {
         /* skip malformed */
       }

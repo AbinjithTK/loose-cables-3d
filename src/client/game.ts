@@ -153,6 +153,8 @@ let dailyDone = false;
 
 // Other players and where they left off (keyed by levelId for map pins).
 let rosterByLevel = new Map<string, RosterEntry[]>();
+// The current user's own snoovatar URL (null if they have none).
+let myAvatarUrl: string | null = null;
 
 let game: CableGame | null = null;
 let mode: Mode | null = null;
@@ -210,6 +212,7 @@ async function serverInit(): Promise<void> {
     profile = data.profile;
     dailyDate = data.dailyDate;
     dailyDone = data.dailyDone;
+    myAvatarUrl = data.avatarUrl ?? null;
     serverAvailable = true;
   } catch {
     serverAvailable = false;
@@ -316,6 +319,35 @@ function userColor(name: string): string {
 function displayName(): string {
   const u = profile.username;
   return !u || u === 'you' || u === 'anonymous' ? 'guest' : u;
+}
+
+/** Builds an avatar element: snoovatar image if available, else a colored initial. */
+function buildAvatarPin(
+  entry: { username: string; avatarUrl: string | null; totalStars?: number },
+  isYou: boolean
+): HTMLElement {
+  const pin = document.createElement('span');
+  pin.className = `player-pin${isYou ? ' you' : ''}`;
+  const setInitial = (): void => {
+    pin.classList.remove('has-img');
+    pin.style.background = userColor(entry.username);
+    pin.textContent = entry.username.slice(0, 1);
+  };
+  if (entry.avatarUrl) {
+    pin.classList.add('has-img');
+    const img = document.createElement('img');
+    img.src = entry.avatarUrl;
+    img.alt = '';
+    img.loading = 'lazy';
+    img.addEventListener('error', setInitial); // graceful fallback if the URL fails
+    pin.appendChild(img);
+  } else {
+    setInitial();
+  }
+  pin.title = isYou
+    ? `You \u2022 u/${entry.username}`
+    : `u/${entry.username}${entry.totalStars != null ? ` \u2022 \u2605 ${entry.totalStars}` : ''}`;
+  return pin;
 }
 
 async function fetchRoster(): Promise<void> {
@@ -448,24 +480,23 @@ function renderMap(): void {
 
       row.appendChild(node);
 
-      // Social pins: other players currently sitting on this level.
-      const here = rosterByLevel.get(level.id);
-      if (here && here.length > 0) {
+      // Social pins: you (at your current level) + other players sitting here.
+      const here = rosterByLevel.get(level.id) ?? [];
+      const isCurrent = level.id === activeId;
+      if (here.length > 0 || isCurrent) {
         const pins = document.createElement('div');
         pins.className = 'player-pins';
-        for (const p of here.slice(0, 3)) {
-          const pin = document.createElement('span');
-          pin.className = 'player-pin';
-          pin.style.background = userColor(p.username);
-          pin.textContent = p.username.slice(0, 1);
-          pin.title = `u/${p.username} \u2022 \u2605 ${p.totalStars}`;
-          pins.appendChild(pin);
+        if (isCurrent) {
+          pins.appendChild(
+            buildAvatarPin({ username: displayName(), avatarUrl: myAvatarUrl }, true)
+          );
         }
-        if (here.length > 3) {
+        for (const p of here.slice(0, 4)) pins.appendChild(buildAvatarPin(p, false));
+        if (here.length > 4) {
           const more = document.createElement('span');
           more.className = 'player-pin more';
-          more.textContent = `+${here.length - 3}`;
-          more.title = here.slice(3).map((p) => `u/${p.username}`).join(', ');
+          more.textContent = `+${here.length - 4}`;
+          more.title = here.slice(4).map((p) => `u/${p.username}`).join(', ');
           pins.appendChild(more);
         }
         row.appendChild(pins);
@@ -500,7 +531,13 @@ function renderMap(): void {
 
 function renderHome(): void {
   homeUsernameEl.textContent = `u/${displayName()}`;
-  homeAvatarEl.textContent = displayName().slice(0, 1);
+  if (myAvatarUrl) {
+    homeAvatarEl.classList.add('has-img');
+    homeAvatarEl.innerHTML = `<img src="${myAvatarUrl}" alt="" />`;
+  } else {
+    homeAvatarEl.classList.remove('has-img');
+    homeAvatarEl.textContent = displayName().slice(0, 1);
+  }
   homeStarsEl.textContent = String(profile.totalStars);
   homeStreakEl.textContent = String(profile.streak);
   homeTiesEl.textContent = String(profile.zipTies);
