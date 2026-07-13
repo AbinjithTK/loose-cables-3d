@@ -15,8 +15,11 @@ import {
   generateCampaignLevel,
   getLevel,
   starsForClear,
+  timeBonusTies,
   zipTiesForClear,
 } from '../../shared/levels/campaign';
+import { checkAchievements, rewardsFor } from '../../shared/achievements';
+import type { CompletionContext } from '../../shared/achievements';
 
 export const api = new Hono();
 
@@ -36,7 +39,11 @@ async function loadProfile(username: string): Promise<PlayerProfile> {
   const raw = await redis.get(profileKey(username));
   if (raw) {
     try {
-      return JSON.parse(raw) as PlayerProfile;
+      const parsed = JSON.parse(raw) as PlayerProfile;
+      // Backfill fields added in later versions so older saved profiles stay valid.
+      parsed.tools = parsed.tools ?? { freeze: 0, cutter: 0 };
+      parsed.achievements = parsed.achievements ?? [];
+      return parsed;
     } catch {
       // fall through to fresh profile
     }
@@ -48,6 +55,8 @@ async function loadProfile(username: string): Promise<PlayerProfile> {
     totalStars: 0,
     lastDaily: null,
     streak: 0,
+    tools: { freeze: 0, cutter: 0 },
+    achievements: [],
   };
 }
 
@@ -113,15 +122,38 @@ api.post('/level-complete', async (c) => {
     };
     profile.levels[body.levelId] = improved;
 
-    const zipTiesEarned = zipTiesForClear(stars, firstClear);
+    // Time bonus: reward finishing with plenty of clock left.
+    const timeSec = typeof body.timeSec === 'number' ? body.timeSec : level.timeLimit;
+    const timeLeftSec = Math.max(0, level.timeLimit - timeSec);
+    const timeBonus = timeBonusTies(timeLeftSec, level.timeLimit);
+
+    const zipTiesEarned = zipTiesForClear(stars, firstClear) + timeBonus;
     profile.zipTies += zipTiesEarned;
     recomputeStars(profile);
+
+    // Achievements: evaluate against the freshly-updated profile + this clear.
+    const ctx: CompletionContext = {
+      levelId: body.levelId,
+      timeLeftPct: level.timeLimit > 0 ? timeLeftSec / level.timeLimit : 0,
+      maxChain: typeof body.maxChain === 'number' ? body.maxChain : 0,
+      noTools: body.noTools ?? true,
+      isBoss: level.isBoss,
+    };
+    const unlocked = checkAchievements(profile, ctx);
+    if (unlocked.length > 0) {
+      profile.achievements = [...profile.achievements, ...unlocked];
+      const reward = rewardsFor(unlocked);
+      profile.tools.freeze += reward.freeze;
+      profile.tools.cutter += reward.cutter;
+    }
     await saveProfile(profile);
 
     return c.json<LevelCompleteResponse>({
       type: 'level-complete',
       stars,
       zipTiesEarned,
+      timeBonus,
+      unlocked,
       profile,
     });
   } catch (error) {

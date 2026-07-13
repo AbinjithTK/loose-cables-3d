@@ -79,6 +79,8 @@ let profile: PlayerProfile = {
   totalStars: 0,
   lastDaily: null,
   streak: 0,
+  tools: { freeze: 0, cutter: 0 },
+  achievements: [],
 };
 let serverAvailable = false;
 let dailyDate = new Date().toISOString().slice(0, 10);
@@ -447,7 +449,7 @@ async function handleWin(moves: number): Promise<void> {
   audio.play('sfx_level_win');
 
   let stars = projectedStars(moves);
-  let ties = 0;
+  let ties: number;
   let subtitle = WIN_FLAVOR[Math.floor(Math.random() * WIN_FLAVOR.length)]!;
   let nextLabel = 'Next';
 
