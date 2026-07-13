@@ -105,6 +105,10 @@ const WIN_FLAVOR = [
 
 function showScreen(el: HTMLDivElement): void {
   for (const s of [screenLoading, screenMap, screenPlay]) s.hidden = s !== el;
+  // Retrigger the enter transition on every swap.
+  el.classList.remove('enter');
+  void el.offsetWidth; // reflow so the animation restarts
+  el.classList.add('enter');
 }
 
 // ---------------------------------------------------------------------------
@@ -196,9 +200,23 @@ function currentLevelId(): string | null {
   return null;
 }
 
+/** Update a wallet counter, bumping its pill when the value increases. */
+function setWallet(el: HTMLSpanElement, value: number): void {
+  const prev = parseInt(el.textContent ?? '0', 10);
+  el.textContent = String(value);
+  if (value > prev) {
+    const pill = el.closest('.wallet');
+    if (pill) {
+      pill.classList.remove('bump');
+      void (pill as HTMLElement).offsetWidth;
+      pill.classList.add('bump');
+    }
+  }
+}
+
 function renderMap(): void {
-  totalStarsEl.textContent = String(profile.totalStars);
-  totalTiesEl.textContent = String(profile.zipTies);
+  setWallet(totalStarsEl, profile.totalStars);
+  setWallet(totalTiesEl, profile.zipTies);
   dailyBtn.textContent = dailyDone ? 'Done' : 'Play';
   dailyBtn.disabled = dailyDone;
   dailyMeta.textContent = dailyDone
@@ -240,6 +258,7 @@ function renderMap(): void {
         level.id === activeId ? 'current' : '',
       ].filter(Boolean).join(' ');
       node.disabled = !playable;
+      node.style.setProperty('--i', String(i)); // staggered pop-in delay
       node.setAttribute('aria-label', `${level.name}${prog ? `, ${prog.stars} stars` : ''}`);
       node.innerHTML = `
         <span class="bubble">${level.isBoss ? '\u2620' : level.index}</span>
@@ -283,11 +302,19 @@ function showMap(): void {
   winOverlay.hidden = true;
   renderMap();
   showScreen(screenMap);
-  // Scroll to the current level's world (bottom = world 1).
+  // Scroll to the current level's world (bottom = world 1). Scroll ONLY the
+  // tower container — scrollIntoView would also scroll the overflow:hidden
+  // screen wrapper and push the header off-screen.
   requestAnimationFrame(() => {
-    const current = towerEl.querySelector('.level-node.current');
-    if (current) current.scrollIntoView({ block: 'center' });
-    else towerScroll.scrollTop = towerScroll.scrollHeight;
+    const current = towerEl.querySelector<HTMLElement>('.level-node.current');
+    if (current) {
+      const nodeRect = current.getBoundingClientRect();
+      const scrollRect = towerScroll.getBoundingClientRect();
+      towerScroll.scrollTop +=
+        nodeRect.top + nodeRect.height / 2 - (scrollRect.top + scrollRect.height / 2);
+    } else {
+      towerScroll.scrollTop = towerScroll.scrollHeight;
+    }
   });
 }
 
@@ -308,10 +335,28 @@ function projectedStars(moves: number): number {
   return 1;
 }
 
+let lastProjected = 3;
+
 function updateHud(moves: number): void {
   hudMoves.textContent = String(moves);
   hudMoves.classList.toggle('over-par', moves > currentPar);
-  hudStars.innerHTML = starGlyphs(projectedStars(moves));
+
+  // Bump the counter on every move.
+  if (moves > 0) {
+    hudMoves.classList.remove('bump');
+    void hudMoves.offsetWidth;
+    hudMoves.classList.add('bump');
+  }
+
+  // Shake the star pill when a projected star is lost.
+  const projected = moves === 0 ? 3 : projectedStars(moves);
+  hudStars.innerHTML = starGlyphs(projected);
+  if (projected < lastProjected) {
+    hudStars.classList.remove('shake');
+    void hudStars.offsetWidth;
+    hudStars.classList.add('shake');
+  }
+  lastProjected = projected;
 }
 
 function showToast(name: string, sub: string): void {
