@@ -81,6 +81,8 @@ export type PuzzleDefinition = {
   emptyPortIds: number[];
   /** Minimum moves required to solve, computed at generation time. */
   optimalMoves: number;
+  /** Renderer cable slack multiplier (1 = default; boss levels use more). */
+  slack?: number;
 };
 
 /**

@@ -12,30 +12,78 @@
     <meta name="x5-fullscreen" content="true" />
     <meta name="360-fullscreen" content="true" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <title>Loose Cables</title>
   </head>
   <body>
     <canvas id="bg"></canvas>
 
-    <div id="hud">Untangle the cables — drag a plug to a free socket</div>
+    <!-- ================= CABLE TOWER MAP ================= -->
+    <div id="map" class="hidden">
+      <header id="mapHeader">
+        <div id="mapTitle">
+          <h1>LOOSE CABLES</h1>
+          <span id="mapSub">The Cable Tower</span>
+        </div>
+        <div id="mapStats">
+          <span class="chip" id="chipStars" title="Total stars">&#9733; 0</span>
+          <span class="chip" id="chipTies" title="Zip Ties">&#128279; 0</span>
+          <button id="muteBtn" class="chip" type="button" title="Toggle sound">&#128266;</button>
+        </div>
+      </header>
 
-    <button id="newBtn" type="button">New</button>
+      <div id="dailyRibbon">
+        <div id="dailyInfo">
+          <strong>Today&apos;s Tangle</strong>
+          <span id="dailyMeta"></span>
+        </div>
+        <button id="dailyBtn" type="button">PLAY</button>
+      </div>
 
-    <div id="menu">
-      <h1>LOOSE CABLES</h1>
-      <p>Drag plugs to free sockets. Unwrap the pile until every cable runs clean.</p>
-      <div id="difficulties">
-        <button type="button" data-diff="easy">Easy</button>
-        <button type="button" data-diff="medium">Medium</button>
-        <button type="button" data-diff="hard">Hard</button>
-        <button type="button" data-diff="extreme">Extreme</button>
-        <button type="button" data-diff="nightmare">Nightmare</button>
+      <main id="tower"></main>
+    </div>
+
+    <!-- ================= IN-LEVEL HUD ================= -->
+    <div id="hud" class="hidden">
+      <div id="hudTop">
+        <button id="backBtn" type="button" aria-label="Back to map">&#8592; Map</button>
+        <div id="hudLevel">
+          <span id="hudName"></span>
+          <span id="hudStars"></span>
+        </div>
+        <div id="hudMoves">Moves <b id="movesNow">0</b>/<span id="movesPar">0</span></div>
+      </div>
+      <div id="hudHint" class="hidden"></div>
+    </div>
+
+    <!-- ================= WIN PANEL ================= -->
+    <div id="win" class="hidden">
+      <div id="winCard">
+        <div id="winTitle">LEVEL CLEAR</div>
+        <div id="winStarRow">
+          <span class="winStar" data-i="0">&#9733;</span>
+          <span class="winStar" data-i="1">&#9733;</span>
+          <span class="winStar" data-i="2">&#9733;</span>
+        </div>
+        <div id="winStats"></div>
+        <div id="winTies" class="hidden"></div>
+        <div id="winFlavor"></div>
+        <div id="winBtns">
+          <button id="improveBtn" type="button">&#8635; Improve</button>
+          <button id="nextBtn" type="button">NEXT &#9654;</button>
+        </div>
+        <button id="winMapBtn" type="button">Back to the Tower</button>
       </div>
     </div>
 
-    <div id="win" class="hidden">
-      <div id="winTitle">ALL CLEAR</div>
-      <div id="winStats"></div>
-      <button id="nextBtn" type="button">Next puzzle</button>
+    <!-- ================= DAILY RESULT ================= -->
+    <div id="dailyResult" class="hidden">
+      <div id="dailyCard">
+        <div id="dailyTitle">TANGLE SUBMITTED</div>
+        <div id="dailyRank"></div>
+        <div id="dailyStreak"></div>
+        <ol id="dailyTop"></ol>
+        <button id="dailyMapBtn" type="button">Back to the Tower</button>
+      </div>
     </div>
 
     <script type="module" src="game.ts" defer></script>
