@@ -14,6 +14,7 @@ import {
   generateCampaignLevel,
   getLevel,
   starsForClear,
+  timeBonusTies,
   type CampaignLevel,
 } from '../shared/levels/campaign';
 import { generatePuzzle } from '../shared/engine/LevelGenerator';
@@ -24,7 +25,15 @@ import type {
   InitResponse,
   LevelCompleteResponse,
   PlayerProfile,
+  ToolSpendResponse,
 } from '../shared/api';
+import {
+  ACHIEVEMENTS,
+  checkAchievements,
+  getAchievement,
+  rewardsFor,
+  type CompletionContext,
+} from '../shared/achievements';
 import { audio } from './audio/AudioBus';
 
 // ---------------------------------------------------------------------------
@@ -40,20 +49,50 @@ const canvas = $<HTMLCanvasElement>('game-canvas');
 
 const totalStarsEl = $<HTMLSpanElement>('total-stars');
 const totalTiesEl = $<HTMLSpanElement>('total-ties');
+const totalFreezeEl = $<HTMLSpanElement>('total-freeze');
+const totalCutterEl = $<HTMLSpanElement>('total-cutter');
 const muteBtn = $<HTMLButtonElement>('mute-btn');
 const towerEl = $<HTMLDivElement>('tower');
 const towerScroll = $<HTMLDivElement>('tower-scroll');
 const dailyBtn = $<HTMLButtonElement>('daily-btn');
 const dailyMeta = $<HTMLParagraphElement>('daily-meta');
+const achStrip = $<HTMLDivElement>('ach-strip');
 
 const backBtn = $<HTMLButtonElement>('back-btn');
 const restartBtn = $<HTMLButtonElement>('restart-btn');
 const hudMoves = $<HTMLSpanElement>('hud-moves');
 const hudPar = $<HTMLSpanElement>('hud-par');
 const hudStars = $<HTMLDivElement>('hud-stars');
+const hudTimer = $<HTMLDivElement>('hud-timer');
+const hudTime = $<HTMLSpanElement>('hud-time');
 const levelToast = $<HTMLDivElement>('level-toast');
 const toastName = $<HTMLHeadingElement>('toast-name');
 const toastSub = $<HTMLParagraphElement>('toast-sub');
+
+// Tools
+const toolbar = $<HTMLDivElement>('toolbar');
+const toolFreezeBtn = $<HTMLButtonElement>('tool-freeze');
+const toolFreezeN = $<HTMLSpanElement>('tool-freeze-n');
+const toolFreezeRing = toolFreezeBtn.querySelector<SVGCircleElement>('.tool-ring circle');
+const toolCutterBtn = $<HTMLButtonElement>('tool-cutter');
+const toolCutterN = $<HTMLSpanElement>('tool-cutter-n');
+const cutHint = $<HTMLDivElement>('cut-hint');
+const zapFlash = $<HTMLDivElement>('zap-flash');
+
+// Tutorial + achievement toast
+const tutorialOverlay = $<HTMLDivElement>('tutorial-overlay');
+const tutorialIcon = $<HTMLDivElement>('tutorial-icon');
+const tutorialTitle = $<HTMLHeadingElement>('tutorial-title');
+const tutorialBody = $<HTMLParagraphElement>('tutorial-body');
+const tutorialOkBtn = $<HTMLButtonElement>('tutorial-ok-btn');
+const achievementToast = $<HTMLDivElement>('achievement-toast');
+const achName = $<HTMLElement>('ach-name');
+const achReward = $<HTMLElement>('ach-reward');
+
+// Game over
+const gameoverOverlay = $<HTMLDivElement>('gameover-overlay');
+const gameoverMapBtn = $<HTMLButtonElement>('gameover-map-btn');
+const gameoverRetryBtn = $<HTMLButtonElement>('gameover-retry-btn');
 
 const winOverlay = $<HTMLDivElement>('win-overlay');
 const winTitle = $<HTMLHeadingElement>('win-title');
@@ -61,8 +100,10 @@ const winFlavor = $<HTMLParagraphElement>('win-flavor');
 const winStarsEl = $<HTMLDivElement>('win-stars');
 const winMovesEl = $<HTMLSpanElement>('win-moves');
 const winParEl = $<HTMLSpanElement>('win-par');
+const winTimeEl = $<HTMLSpanElement>('win-time');
 const winTies = $<HTMLDivElement>('win-ties');
 const winTiesN = $<HTMLSpanElement>('win-ties-n');
+const winBonus = $<HTMLDivElement>('win-bonus');
 const winRetryBtn = $<HTMLButtonElement>('win-retry-btn');
 const winNextBtn = $<HTMLButtonElement>('win-next-btn');
 
@@ -91,6 +132,20 @@ let mode: Mode | null = null;
 let currentPar = 0;
 let levelStartAt = 0;
 let toastTimer: ReturnType<typeof setTimeout> | null = null;
+
+// -- Timer / tools / mechanics state ----------------------------------------
+const FREEZE_MS = 15_000;
+let timeLimitSec = 0;
+let timeLeftMs = 0;
+let timerActive = false;
+let timerLastTs = 0;
+let freezeEndsAt = 0; // performance.now() ms; clock is frozen until then
+let overlayPaused = false; // tutorial open -> clock paused
+let surgeSchedule: number[] = []; // timeLeftMs thresholds (descending) to fire a surge
+let maxChainReached = 0;
+let noToolsUsed = true;
+let cutArmed = false;
+let lowTimeWarned = false;
 
 const WIN_FLAVOR = [
   'The drawer closes. For now.',
@@ -132,13 +187,19 @@ async function serverInit(): Promise<void> {
   }
 }
 
-async function serverLevelComplete(levelId: string, moves: number): Promise<LevelCompleteResponse | null> {
+async function serverLevelComplete(
+  levelId: string,
+  moves: number,
+  timeSec: number,
+  maxChain: number,
+  noTools: boolean
+): Promise<LevelCompleteResponse | null> {
   if (!serverAvailable) return null;
   try {
     const res = await fetch('/api/level-complete', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ levelId, moves }),
+      body: JSON.stringify({ levelId, moves, timeSec, maxChain, noTools }),
     });
     if (!res.ok) return null;
     const data = (await res.json()) as LevelCompleteResponse;
@@ -164,8 +225,14 @@ async function serverDailyScore(moves: number, timeMs: number): Promise<DailySco
   }
 }
 
-/** Local fallback: apply a clear to the in-memory profile. */
-function localLevelComplete(levelId: string, moves: number, par: number): { stars: number; ties: number } {
+/** Local fallback: apply a clear to the in-memory profile (+ offline achievements). */
+function localLevelComplete(
+  levelId: string,
+  moves: number,
+  par: number,
+  timeBonus: number,
+  ctx: CompletionContext
+): { stars: number; ties: number; unlocked: string[] } {
   const stars = starsForClear(moves, par);
   const existing = profile.levels[levelId];
   const firstClear = !existing;
@@ -175,9 +242,18 @@ function localLevelComplete(levelId: string, moves: number, par: number): { star
   };
   let ties = firstClear ? 2 : 0;
   if (stars === 3) ties += 1;
+  ties += timeBonus;
   profile.zipTies += ties;
   profile.totalStars = Object.values(profile.levels).reduce((n, l) => n + l.stars, 0);
-  return { stars, ties };
+
+  const unlocked = checkAchievements(profile, ctx);
+  if (unlocked.length > 0) {
+    profile.achievements = [...profile.achievements, ...unlocked];
+    const reward = rewardsFor(unlocked);
+    profile.tools.freeze += reward.freeze;
+    profile.tools.cutter += reward.cutter;
+  }
+  return { stars, ties, unlocked };
 }
 
 // ---------------------------------------------------------------------------
@@ -216,9 +292,25 @@ function setWallet(el: HTMLSpanElement, value: number): void {
   }
 }
 
+function renderAchievementChips(): void {
+  const owned = new Set(profile.achievements ?? []);
+  achStrip.innerHTML = '';
+  for (const a of ACHIEVEMENTS) {
+    const earned = owned.has(a.id);
+    const chip = document.createElement('span');
+    chip.className = `ach-chip${earned ? ' earned' : ''}`;
+    chip.title = earned ? a.description : `Locked — ${a.description}`;
+    chip.innerHTML = `<span class="ach-chip-badge">${earned ? '\u{1F3C6}' : '\u{1F512}'}</span>${a.name}`;
+    achStrip.appendChild(chip);
+  }
+}
+
 function renderMap(): void {
   setWallet(totalStarsEl, profile.totalStars);
   setWallet(totalTiesEl, profile.zipTies);
+  setWallet(totalFreezeEl, profile.tools.freeze);
+  setWallet(totalCutterEl, profile.tools.cutter);
+  renderAchievementChips();
   dailyBtn.textContent = dailyDone ? 'Done' : 'Play';
   dailyBtn.disabled = dailyDone;
   dailyMeta.textContent = dailyDone
@@ -300,8 +392,12 @@ function renderMap(): void {
 }
 
 function showMap(): void {
+  stopLevelTimer();
+  disarmCut();
   disposeGame();
   winOverlay.hidden = true;
+  gameoverOverlay.hidden = true;
+  tutorialOverlay.hidden = true;
   renderMap();
   showScreen(screenMap);
   // Scroll to the current level's world (bottom = world 1). Scroll ONLY the
@@ -384,9 +480,21 @@ function chainCallout(chainIndex: number): void {
   setTimeout(() => el.remove(), 850);
 }
 
-function launchPuzzle(puzzle: PuzzleDefinition, theme: GameTheme, toastTitle: string, toastSubText: string): void {
+type TimerOpts = { limitSec: number; surgeCount: number };
+
+function launchPuzzle(
+  puzzle: PuzzleDefinition,
+  theme: GameTheme,
+  toastTitle: string,
+  toastSubText: string,
+  timed: TimerOpts | null
+): void {
   disposeGame();
   winOverlay.hidden = true;
+  gameoverOverlay.hidden = true;
+  disarmCut();
+  maxChainReached = 0;
+  noToolsUsed = true;
   currentPar = puzzle.optimalMoves;
   hudPar.textContent = String(currentPar);
   updateHud(0);
@@ -400,6 +508,7 @@ function launchPuzzle(puzzle: PuzzleDefinition, theme: GameTheme, toastTitle: st
     onDeny: () => audio.play('sfx_plug_deny'),
     onSnap: () => audio.play('sfx_plug_snap'),
     onClear: (chainIndex) => {
+      maxChainReached = Math.max(maxChainReached, chainIndex);
       audio.play('sfx_cable_resolve', { volume: 0.7 });
       audio.play('sfx_resolve_pop', { pitch: Math.min(chainIndex, 6) * 2 });
       if (chainIndex >= 1) {
@@ -407,20 +516,42 @@ function launchPuzzle(puzzle: PuzzleDefinition, theme: GameTheme, toastTitle: st
         chainCallout(chainIndex);
       }
     },
+    onZap: () => {
+      audio.play('sfx_zap');
+      flashScreen('zap');
+    },
+    onCut: () => onCableCut(),
+    onSurge: () => flashScreen('surge'),
     onWin: (moves) => void handleWin(moves),
   }, theme);
+
+  // Timed (campaign) vs untimed (daily practice).
+  if (timed) {
+    hudTimer.style.display = '';
+    toolbar.style.display = 'flex';
+    updateToolUi();
+    startLevelTimer(timed.limitSec, timed.surgeCount);
+  } else {
+    stopLevelTimer();
+    hudTimer.style.display = 'none';
+    toolbar.style.display = 'none';
+  }
 }
 
 function startCampaignLevel(level: CampaignLevel): void {
   const world = WORLDS[level.world - 1]!;
   mode = { kind: 'campaign', level };
   const puzzle = generateCampaignLevel(level);
+  // Bosses in the Nightmare Datacenter surge twice; other surge levels once.
+  const surgeCount = level.mechanics.surge ? (level.isBoss ? 2 : 1) : 0;
   launchPuzzle(
     puzzle,
     world,
     `${level.isBoss ? '\u2620 BOSS: ' : ''}${level.name}`,
-    `${world.name} \u2022 Level ${level.index}/${LEVELS_PER_WORLD} \u2022 Par ${puzzle.optimalMoves}`
+    `${world.name} \u2022 Level ${level.index}/${LEVELS_PER_WORLD} \u2022 Par ${puzzle.optimalMoves}`,
+    { limitSec: level.timeLimit, surgeCount }
   );
+  queueTutorials(level, puzzle);
 }
 
 function startDaily(): void {
@@ -431,12 +562,345 @@ function startDaily(): void {
     name: "Today's Tangle",
     scene: 'strip',
   });
+  // Daily is a relaxed practice board: no countdown, no tools.
   launchPuzzle(
     puzzle,
     DEFAULT_THEME,
     "Today's Tangle",
-    `${dailyDate} \u2022 Par ${puzzle.optimalMoves} \u2022 One attempt counts`
+    `${dailyDate} \u2022 Par ${puzzle.optimalMoves} \u2022 One attempt counts`,
+    null
   );
+}
+
+// ---------------------------------------------------------------------------
+// Countdown timer + power surges
+// ---------------------------------------------------------------------------
+
+function formatClock(ms: number): string {
+  const total = Math.max(0, Math.ceil(ms / 1000));
+  const m = Math.floor(total / 60);
+  const s = total % 60;
+  return `${m}:${String(s).padStart(2, '0')}`;
+}
+
+function startLevelTimer(limitSec: number, surgeCount: number): void {
+  timeLimitSec = limitSec;
+  timeLeftMs = limitSec * 1000;
+  freezeEndsAt = 0;
+  overlayPaused = false;
+  lowTimeWarned = false;
+  // Evenly space surges across the level (never at the very start or end).
+  surgeSchedule = [];
+  for (let i = 1; i <= surgeCount; i++) {
+    surgeSchedule.push(limitSec * 1000 * (1 - i / (surgeCount + 1)));
+  }
+  timerLastTs = performance.now();
+  timerActive = true;
+  updateTimerUi(false);
+  requestAnimationFrame(timerTick);
+}
+
+function stopLevelTimer(): void {
+  timerActive = false;
+}
+
+function timerTick(ts: number): void {
+  if (!timerActive) return;
+  const dt = ts - timerLastTs;
+  timerLastTs = ts;
+  const frozen = ts < freezeEndsAt;
+
+  if (!overlayPaused && !frozen) {
+    timeLeftMs -= dt;
+
+    // Fire any surges whose threshold we've crossed.
+    while (surgeSchedule.length > 0 && timeLeftMs <= surgeSchedule[0]!) {
+      surgeSchedule.shift();
+      audio.play('sfx_surge_warning');
+      flashScreen('surge');
+      game?.triggerSurge();
+    }
+
+    const secLeft = timeLeftMs / 1000;
+    if (secLeft <= 10 && !lowTimeWarned) {
+      lowTimeWarned = true;
+      audio.play('sfx_timer_tick');
+    }
+
+    if (timeLeftMs <= 0) {
+      timeLeftMs = 0;
+      updateTimerUi(false);
+      handleGameOver();
+      return;
+    }
+  }
+
+  if (freezeEndsAt && ts >= freezeEndsAt) {
+    freezeEndsAt = 0;
+    toolFreezeBtn.classList.remove('active');
+    if (toolFreezeRing) toolFreezeRing.style.strokeDashoffset = '';
+  }
+
+  updateTimerUi(frozen);
+  requestAnimationFrame(timerTick);
+}
+
+function updateTimerUi(frozen: boolean): void {
+  hudTime.textContent = formatClock(timeLeftMs);
+  const sec = timeLeftMs / 1000;
+  hudTimer.classList.toggle('frozen', frozen);
+  hudTimer.classList.toggle('warn', !frozen && sec <= 30 && sec > 10);
+  hudTimer.classList.toggle('critical', !frozen && sec <= 10);
+}
+
+// ---------------------------------------------------------------------------
+// Tools: Time Freeze + Wire Cutter
+// ---------------------------------------------------------------------------
+
+function updateToolUi(): void {
+  toolFreezeN.textContent = String(profile.tools.freeze);
+  toolCutterN.textContent = String(profile.tools.cutter);
+  const frozen = performance.now() < freezeEndsAt;
+  toolFreezeBtn.disabled = profile.tools.freeze <= 0 || frozen;
+  toolCutterBtn.disabled = profile.tools.cutter <= 0 && !cutArmed;
+}
+
+/** Optimistically spend a tool charge and persist it to the server. */
+function spendTool(tool: 'freeze' | 'cutter'): void {
+  if (profile.tools[tool] > 0) profile.tools[tool] -= 1;
+  noToolsUsed = false;
+  updateToolUi();
+  if (!serverAvailable) return;
+  void fetch('/api/tool-spend', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ tool }),
+  })
+    .then((r) => (r.ok ? (r.json() as Promise<ToolSpendResponse | { status: string }>) : null))
+    .then((d) => {
+      if (d && 'type' in d && d.type === 'tool-spend') {
+        profile = d.profile;
+        updateToolUi();
+      }
+    })
+    .catch(() => {});
+}
+
+function useFreeze(): void {
+  if (!timerActive || profile.tools.freeze <= 0) return;
+  const now = performance.now();
+  if (now < freezeEndsAt) return; // already frozen
+  spendTool('freeze');
+  freezeEndsAt = now + FREEZE_MS;
+  audio.play('sfx_freeze');
+  toolFreezeBtn.classList.add('active');
+  // Sweep the ring over the freeze duration.
+  if (toolFreezeRing) {
+    const c = 2 * Math.PI * 20;
+    toolFreezeRing.style.strokeDasharray = String(c);
+    toolFreezeRing.style.transition = 'none';
+    toolFreezeRing.style.strokeDashoffset = '0';
+    requestAnimationFrame(() => {
+      toolFreezeRing.style.transition = `stroke-dashoffset ${FREEZE_MS}ms linear`;
+      toolFreezeRing.style.strokeDashoffset = String(c);
+    });
+  }
+}
+
+function armCut(): void {
+  if (!game) return;
+  if (cutArmed) {
+    disarmCut();
+    return;
+  }
+  if (profile.tools.cutter <= 0) return;
+  cutArmed = true;
+  game.setCutMode(true);
+  screenPlay.classList.add('cut-mode');
+  toolCutterBtn.classList.add('armed');
+  cutHint.hidden = false;
+  audio.play('sfx_ui_tap');
+}
+
+function disarmCut(): void {
+  cutArmed = false;
+  game?.setCutMode(false);
+  screenPlay.classList.remove('cut-mode');
+  toolCutterBtn.classList.remove('armed');
+  cutHint.hidden = true;
+}
+
+/** Called by the engine when a cable is actually cut — consume the charge. */
+function onCableCut(): void {
+  spendTool('cutter');
+  disarmCut();
+  audio.play('sfx_cut');
+}
+
+function flashScreen(kind: 'zap' | 'surge'): void {
+  zapFlash.classList.remove('on');
+  void zapFlash.offsetWidth;
+  zapFlash.classList.add('on');
+  if (kind === 'surge') hudTimer.classList.add('critical');
+}
+
+// ---------------------------------------------------------------------------
+// Game over (ran out of time)
+// ---------------------------------------------------------------------------
+
+function handleGameOver(): void {
+  stopLevelTimer();
+  disarmCut();
+  audio.play('sfx_time_up');
+  gameoverOverlay.hidden = false;
+}
+
+// ---------------------------------------------------------------------------
+// Mechanic tutorials (shown once per mechanic, tracked in localStorage)
+// ---------------------------------------------------------------------------
+
+type Tutorial = { key: string; icon: string; title: string; body: string };
+
+const TUTORIALS: Record<string, Tutorial> = {
+  bolted: {
+    key: 'bolted',
+    icon: '\u{1F529}',
+    title: 'Bolted Ends',
+    body: 'Some plugs are bolted down and cannot be moved. Route every other cable around them.',
+  },
+  golden: {
+    key: 'golden',
+    icon: '\u2728',
+    title: 'The Golden Cable',
+    body: 'The glowing gold cable settles LAST. Clear everything around it and it snaps free on its own.',
+  },
+  liveWire: {
+    key: 'liveWire',
+    icon: '\u26A1',
+    title: 'Live Wire',
+    body: 'The sparking cable is live. Grab it while it still crosses another and you take a +1 move zap. Free its path first.',
+  },
+  blackout: {
+    key: 'blackout',
+    icon: '\u{1F526}',
+    title: 'Blackout',
+    body: 'The lights are out. Move your pointer to sweep the flashlight across the board and find the tangle.',
+  },
+  surge: {
+    key: 'surge',
+    icon: '\u{1F329}',
+    title: 'Power Surge',
+    body: 'A surge will yank a cable to a new socket mid-level. Watch the flash and adapt fast.',
+  },
+  toolFreeze: {
+    key: 'toolFreeze',
+    icon: '\u2744',
+    title: 'Time Freeze',
+    body: 'Earned from achievements. Tap the snowflake to freeze the clock for 15 seconds.',
+  },
+  toolCutter: {
+    key: 'toolCutter',
+    icon: '\u2702',
+    title: 'Wire Cutter',
+    body: 'Earned from achievements. Tap the scissors, then tap any cable to cut it clean off the board.',
+  },
+};
+
+const SEEN_KEY = 'lc3d.seenTutorials';
+
+function loadSeen(): Set<string> {
+  try {
+    return new Set(JSON.parse(localStorage.getItem(SEEN_KEY) ?? '[]') as string[]);
+  } catch {
+    return new Set();
+  }
+}
+
+function markSeen(seen: Set<string>): void {
+  try {
+    localStorage.setItem(SEEN_KEY, JSON.stringify([...seen]));
+  } catch {
+    /* ignore */
+  }
+}
+
+let tutorialQueue: Tutorial[] = [];
+
+function queueTutorials(level: CampaignLevel, puzzle: PuzzleDefinition): void {
+  const seen = loadSeen();
+  const keys: string[] = [];
+  if (puzzle.cables.some((c) => c.lockA || c.lockB)) keys.push('bolted');
+  if (level.mechanics.golden) keys.push('golden');
+  if (level.mechanics.liveWire) keys.push('liveWire');
+  if (level.mechanics.blackout) keys.push('blackout');
+  if (level.mechanics.surge) keys.push('surge');
+  if (profile.tools.freeze > 0) keys.push('toolFreeze');
+  if (profile.tools.cutter > 0) keys.push('toolCutter');
+
+  tutorialQueue = keys.filter((k) => !seen.has(k)).map((k) => TUTORIALS[k]!).filter(Boolean);
+  if (tutorialQueue.length > 0) {
+    overlayPaused = true;
+    showNextTutorial();
+  }
+}
+
+function showNextTutorial(): void {
+  const t = tutorialQueue.shift();
+  if (!t) {
+    tutorialOverlay.hidden = true;
+    overlayPaused = false;
+    timerLastTs = performance.now(); // don't count paused time against the clock
+    return;
+  }
+  tutorialIcon.textContent = t.icon;
+  tutorialTitle.textContent = t.title;
+  tutorialBody.textContent = t.body;
+  tutorialOverlay.hidden = false;
+  const seen = loadSeen();
+  seen.add(t.key);
+  markSeen(seen);
+}
+
+// ---------------------------------------------------------------------------
+// Achievement toasts
+// ---------------------------------------------------------------------------
+
+const achievementQueue: string[] = [];
+let achievementShowing = false;
+
+function showAchievements(ids: string[]): void {
+  achievementQueue.push(...ids);
+  if (!achievementShowing) showNextAchievement();
+}
+
+function showNextAchievement(): void {
+  const id = achievementQueue.shift();
+  if (!id) {
+    achievementShowing = false;
+    return;
+  }
+  const a = getAchievement(id);
+  if (!a) {
+    showNextAchievement();
+    return;
+  }
+  achievementShowing = true;
+  achName.textContent = a.name;
+  const parts: string[] = [];
+  if (a.reward.freeze) parts.push(`\u2744 +${a.reward.freeze}`);
+  if (a.reward.cutter) parts.push(`\u2702 +${a.reward.cutter}`);
+  achReward.textContent = parts.length > 0 ? `Unlocked \u2022 ${parts.join('  ')}` : 'Achievement unlocked';
+  achievementToast.hidden = false;
+  achievementToast.classList.remove('leaving');
+  audio.play('sfx_achievement');
+  updateToolUi();
+  setTimeout(() => {
+    achievementToast.classList.add('leaving');
+    setTimeout(() => {
+      achievementToast.hidden = true;
+      showNextAchievement();
+    }, 420);
+  }, 2600);
 }
 
 // ---------------------------------------------------------------------------
@@ -445,28 +909,47 @@ function startDaily(): void {
 
 async function handleWin(moves: number): Promise<void> {
   if (!mode) return;
+  stopLevelTimer();
+  disarmCut();
   const timeMs = Math.round(performance.now() - levelStartAt);
   audio.play('sfx_level_win');
 
   let stars = projectedStars(moves);
   let ties: number;
+  let timeBonus = 0;
+  let unlocked: string[] = [];
   let subtitle = WIN_FLAVOR[Math.floor(Math.random() * WIN_FLAVOR.length)]!;
   let nextLabel = 'Next';
 
   if (mode.kind === 'campaign') {
-    const levelId = mode.level.id;
-    const server = await serverLevelComplete(levelId, moves);
+    const level = mode.level;
+    const levelId = level.id;
+    const timeSec = Math.round(timeMs / 1000);
+    const timeLeftSec = Math.max(0, timeLimitSec - timeSec);
+    const server = await serverLevelComplete(levelId, moves, timeSec, maxChainReached, noToolsUsed);
     if (server) {
       stars = server.stars;
       ties = server.zipTiesEarned;
+      timeBonus = server.timeBonus;
+      unlocked = server.unlocked;
       profile = server.profile;
     } else {
-      const local = localLevelComplete(levelId, moves, currentPar);
+      const timeLeftPct = timeLimitSec > 0 ? timeLeftSec / timeLimitSec : 0;
+      timeBonus = timeBonusTies(timeLeftSec, timeLimitSec);
+      const ctx: CompletionContext = {
+        levelId,
+        timeLeftPct,
+        maxChain: maxChainReached,
+        noTools: noToolsUsed,
+        isBoss: level.isBoss,
+      };
+      const local = localLevelComplete(levelId, moves, currentPar, timeBonus, ctx);
       stars = local.stars;
       ties = local.ties;
+      unlocked = local.unlocked;
     }
-    winTitle.textContent = mode.level.isBoss ? 'BOSS DEFEATED!' : 'Level Clear!';
-    if (mode.level.isBoss) {
+    winTitle.textContent = level.isBoss ? 'BOSS DEFEATED!' : 'Level Clear!';
+    if (level.isBoss) {
       subtitle = 'The tower rumbles. A new floor unlocks above\u2026';
       audio.play('sfx_world_unlock');
     }
@@ -475,6 +958,7 @@ async function handleWin(moves: number): Promise<void> {
     dailyDone = true;
     if (server) {
       ties = server.zipTiesEarned;
+      unlocked = server.unlocked;
       profile = server.profile;
       subtitle = `Rank #${server.rank} of ${server.total} today \u2022 streak ${server.streak}`;
       if (server.streak > 1) audio.play('sfx_streak_flame');
@@ -483,6 +967,14 @@ async function handleWin(moves: number): Promise<void> {
       profile.lastDaily = dailyDate;
       ties = 3;
       profile.zipTies += ties;
+      const local = checkAchievements(profile, null);
+      if (local.length > 0) {
+        profile.achievements = [...profile.achievements, ...local];
+        const reward = rewardsFor(local);
+        profile.tools.freeze += reward.freeze;
+        profile.tools.cutter += reward.cutter;
+      }
+      unlocked = local;
       subtitle = `Cleared in ${moves} moves \u2022 streak ${profile.streak}`;
     }
     winTitle.textContent = 'Tangle Untangled!';
@@ -493,10 +985,13 @@ async function handleWin(moves: number): Promise<void> {
   winFlavor.textContent = subtitle;
   winMovesEl.textContent = String(moves);
   winParEl.textContent = String(currentPar);
+  winTimeEl.textContent = formatClock(timeMs);
   winNextBtn.textContent = nextLabel;
   winTies.hidden = ties <= 0;
   winTiesN.textContent = String(ties);
+  winBonus.hidden = timeBonus <= 0;
   if (ties > 0) setTimeout(() => audio.play('sfx_ziptie_earn'), 1400);
+  if (unlocked.length > 0) setTimeout(() => showAchievements(unlocked), 1800);
 
   // Star pop sequence.
   const starEls = Array.from(winStarsEl.querySelectorAll<HTMLSpanElement>('.star'));
@@ -550,6 +1045,32 @@ winRetryBtn.addEventListener('click', () => {
 });
 
 winNextBtn.addEventListener('click', nextAfterWin);
+
+toolFreezeBtn.addEventListener('click', () => {
+  audio.play('sfx_ui_tap');
+  useFreeze();
+});
+
+toolCutterBtn.addEventListener('click', () => {
+  armCut();
+});
+
+tutorialOkBtn.addEventListener('click', () => {
+  audio.play('sfx_ui_tap');
+  showNextTutorial();
+});
+
+gameoverMapBtn.addEventListener('click', () => {
+  audio.play('sfx_ui_tap');
+  showMap();
+});
+
+gameoverRetryBtn.addEventListener('click', () => {
+  audio.play('sfx_ui_tap');
+  gameoverOverlay.hidden = true;
+  if (mode?.kind === 'campaign') startCampaignLevel(mode.level);
+  else startDaily();
+});
 
 dailyBtn.addEventListener('click', () => {
   if (dailyDone) return;

@@ -10,6 +10,8 @@ import type {
   LevelCompleteResponse,
   LevelProgress,
   PlayerProfile,
+  ToolSpendRequest,
+  ToolSpendResponse,
 } from '../../shared/api';
 import {
   generateCampaignLevel,
@@ -199,6 +201,7 @@ api.post('/daily-score', async (c) => {
     const score = body.moves * 10_000_000 + Math.min(body.timeMs, 9_999_999);
     const already = profile.lastDaily === dateIso;
 
+    let unlocked: string[] = [];
     if (!already) {
       await redis.zAdd(key, { member: username, score });
       await redis.hSet(key + ':meta', {
@@ -210,6 +213,15 @@ api.post('/daily-score', async (c) => {
       profile.streak = profile.lastDaily === yesterday ? profile.streak + 1 : 1;
       profile.lastDaily = dateIso;
       profile.zipTies += 3;
+
+      // Streak-based achievements (no per-clear context for the daily).
+      unlocked = checkAchievements(profile, null);
+      if (unlocked.length > 0) {
+        profile.achievements = [...profile.achievements, ...unlocked];
+        const reward = rewardsFor(unlocked);
+        profile.tools.freeze += reward.freeze;
+        profile.tools.cutter += reward.cutter;
+      }
       await saveProfile(profile);
     }
 
@@ -242,10 +254,35 @@ api.post('/daily-score', async (c) => {
       top,
       zipTiesEarned: already ? 0 : 3,
       streak: profile.streak,
+      unlocked,
       profile,
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : 'daily failed';
+    return c.json<ErrorResponse>({ status: 'error', message }, 400);
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Tools — spend a Time Freeze / Wire Cutter charge (earned via achievements)
+// ---------------------------------------------------------------------------
+
+api.post('/tool-spend', async (c) => {
+  try {
+    const body = (await c.req.json()) as ToolSpendRequest;
+    if (body.tool !== 'freeze' && body.tool !== 'cutter') {
+      return c.json<ErrorResponse>({ status: 'error', message: 'invalid tool' }, 400);
+    }
+    const username = await currentUsername();
+    const profile = await loadProfile(username);
+    if (profile.tools[body.tool] <= 0) {
+      return c.json<ErrorResponse>({ status: 'error', message: 'no charges' }, 400);
+    }
+    profile.tools[body.tool] -= 1;
+    await saveProfile(profile);
+    return c.json<ToolSpendResponse>({ type: 'tool-spend', profile });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'tool-spend failed';
     return c.json<ErrorResponse>({ status: 'error', message }, 400);
   }
 });

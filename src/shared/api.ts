@@ -73,6 +73,8 @@ export type DailyScoreResponse = {
   top: DailyEntry[];
   zipTiesEarned: number;
   streak: number;
+  /** Newly unlocked achievement ids (rewards already applied to profile). */
+  unlocked: string[];
   profile: PlayerProfile;
 };
 

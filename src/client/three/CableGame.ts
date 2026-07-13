@@ -113,6 +113,12 @@ export type CableGameCallbacks = {
   onSnap?: () => void;
   /** A cable cleared; chainIndex is 0 for the first in a cascade, 1, 2... for chained clears. */
   onClear?: (chainIndex: number) => void;
+  /** Live wire grabbed while still crossing others (a +1 move zap was applied). */
+  onZap?: () => void;
+  /** A cable was cut with the Wire Cutter tool. */
+  onCut?: () => void;
+  /** A power surge fired, relocating a cable end. */
+  onSurge?: () => void;
 };
 
 function hexToNumber(hex: string): number {
@@ -153,6 +159,25 @@ export class CableGame {
 
   /** Deny-wiggle animations for bolted plugs. */
   private denyAnims: Array<{ plug: THREE.Group; t: number; baseQuat: THREE.Quaternion }> = [];
+
+  // -- Mechanics state --------------------------------------------------------
+  /** W3+: this cable resolves only when it is the last one on the board. */
+  private goldenId: string | null = null;
+  /** W4+: grabbing this cable while it crosses others costs +1 move. */
+  private liveWireId: string | null = null;
+  /** W5+: board is dark; a flashlight cone tracks the pointer. */
+  private blackout = false;
+  /** Wire Cutter tool armed: next tap cuts a cable instead of grabbing. */
+  private cutMode = false;
+  /** Lights kept as fields so blackout can dim them. */
+  private ambient!: THREE.AmbientLight;
+  private keyLight!: THREE.DirectionalLight;
+  private flashlight: THREE.SpotLight | null = null;
+  private flashTarget: THREE.Object3D | null = null;
+  /** Last pointer position projected onto the board (drives the flashlight). */
+  private lastPlanePoint = new THREE.Vector3(0, PEG_TOP_Y, 0);
+  /** Cables that pulse (golden). */
+  private pulsers: Array<{ material: THREE.MeshStandardMaterial; base: number }> = [];
 
   /** Win confetti particles. */
   private confetti: Array<{
@@ -226,6 +251,13 @@ export class CableGame {
     this.setupBoard();
     this.setupPegs();
     this.buildCables();
+
+    // Wire up the level's mechanics (visuals + lighting).
+    this.goldenId = this.def.goldenCableId ?? null;
+    this.liveWireId = this.def.liveWireCableId ?? null;
+    this.blackout = this.def.blackout ?? false;
+    this.applyMechanicVisuals();
+    if (this.blackout) this.applyBlackout();
 
     window.addEventListener('resize', this.onResize);
     canvas.addEventListener('pointerdown', this.onPointerDown);
@@ -346,9 +378,11 @@ export class CableGame {
   }
 
   private setupLights(): void {
-    this.scene.add(new THREE.AmbientLight(0xffffff, 0.5));
+    this.ambient = new THREE.AmbientLight(0xffffff, 0.5);
+    this.scene.add(this.ambient);
 
     const key = new THREE.DirectionalLight(hexToNumber(this.theme.keyLight), 1.2);
+    this.keyLight = key;
     key.position.set(7, 20, 9);
     key.castShadow = true;
     key.shadow.mapSize.set(2048, 2048);
@@ -875,6 +909,144 @@ export class CableGame {
   }
 
   // -------------------------------------------------------------------------
+  // Mechanics: golden cable, live wire, blackout, power surge, wire cutter
+  // -------------------------------------------------------------------------
+
+  /** Paints the golden and live-wire cables so players can read them at a glance. */
+  private applyMechanicVisuals(): void {
+    if (this.goldenId) {
+      const gold = this.cables.find((c) => c.id === this.goldenId);
+      if (gold) {
+        gold.material.color = new THREE.Color(0xffd45a);
+        gold.material.emissive = new THREE.Color(0xffb02e);
+        gold.material.emissiveIntensity = 0.45;
+        gold.material.metalness = 0.75;
+        gold.material.roughness = 0.3;
+        this.pulsers.push({ material: gold.material, base: 0.45 });
+      }
+    }
+    if (this.liveWireId) {
+      const live = this.cables.find((c) => c.id === this.liveWireId);
+      if (live) {
+        live.material.emissive = new THREE.Color(0xffe14d);
+        live.material.emissiveIntensity = 0.5;
+        this.pulsers.push({ material: live.material, base: 0.5 });
+      }
+    }
+  }
+
+  /** Kills the room lights and adds a pointer-tracking flashlight cone. */
+  private applyBlackout(): void {
+    this.ambient.intensity = 0.07;
+    this.keyLight.intensity = 0.18;
+    this.scene.fog = new THREE.Fog(0x02030a, 12, 34);
+
+    const target = new THREE.Object3D();
+    target.position.set(0, 0, 0);
+    this.scene.add(target);
+    this.flashTarget = target;
+
+    const spot = new THREE.SpotLight(0xfff3d0, 5.5, 26, Math.PI / 6, 0.45, 1.1);
+    spot.position.set(0, 9, 0);
+    spot.target = target;
+    spot.castShadow = true;
+    this.scene.add(spot);
+    this.flashlight = spot;
+  }
+
+  /** Moves the blackout flashlight to hover over the last pointer position. */
+  private updateFlashlight(): void {
+    if (!this.flashlight || !this.flashTarget) return;
+    const p = this.lastPlanePoint;
+    this.flashlight.position.set(p.x, 9, p.z);
+    this.flashTarget.position.set(p.x, 0, p.z);
+  }
+
+  /** Gentle emissive breathing for the golden / live-wire cables. */
+  private updatePulsers(): void {
+    if (this.pulsers.length === 0) return;
+    const wave = 0.5 + 0.5 * Math.sin(this.elapsed * 3);
+    for (const p of this.pulsers) {
+      p.material.emissiveIntensity = p.base * (0.55 + 0.6 * wave);
+    }
+  }
+
+  /** Arms/disarms Wire Cutter mode (next tap cuts a cable instead of grabbing). */
+  setCutMode(on: boolean): void {
+    this.cutMode = on;
+    this.canvas.style.cursor = on ? 'crosshair' : 'default';
+  }
+
+  /** Cuts the cable nearest the given board point, retracting it immediately. */
+  private cutCableWorld(hit: THREE.Vector3): boolean {
+    let best: Cable | null = null;
+    let bestDist = 1.6;
+    for (const cable of this.cables) {
+      if (cable.cleared) continue;
+      for (const b of cable.bodies) {
+        const d = Math.hypot(b.position.x - hit.x, b.position.z - hit.z);
+        if (d < bestDist) {
+          bestDist = d;
+          best = cable;
+        }
+      }
+    }
+    if (!best) return false;
+    this.setCutMode(false);
+    this.clearCable(best, true);
+    return true;
+  }
+
+  /**
+   * A power surge: relocate one end of a random uncleared cable to a random
+   * empty socket, re-tangling the board. Pressure, not punishment — the board
+   * stays solvable because ends can always be moved back to any empty port.
+   */
+  triggerSurge(): void {
+    const candidates = this.cables.filter((c) => !c.cleared && c !== this.dragCable);
+    if (candidates.length === 0) return;
+
+    const occupied = new Set<number>();
+    for (const c of this.cables) {
+      if (c.cleared) continue;
+      for (const e of c.ends) occupied.add(e.pegPortId);
+    }
+    const emptyPorts = this.def.ports.map((p) => p.id).filter((id) => !occupied.has(id));
+    if (emptyPorts.length === 0) return;
+
+    const cable = candidates[Math.floor(Math.random() * candidates.length)]!;
+    // Prefer a movable (unbolted) end.
+    const movableEnds = cable.ends.filter((e) => !e.locked);
+    if (movableEnds.length === 0) return;
+    const end = movableEnds[Math.floor(Math.random() * movableEnds.length)]!;
+    const targetPort = emptyPorts[Math.floor(Math.random() * emptyPorts.length)]!;
+
+    this.relocateEnd(cable, end, targetPort);
+
+    // Flash the surged cable so the player can see what moved.
+    cable.material.emissive = new THREE.Color(0x7ec8ff);
+    cable.material.emissiveIntensity = 1.1;
+    this.pulsers.push({ material: cable.material, base: 0 });
+    this.callbacks.onSurge?.();
+  }
+
+  /** Moves one cable end to a new port, re-pinning it and waking the chain. */
+  private relocateEnd(cable: Cable, end: CableEnd, portId: number): void {
+    if (end.pinConstraint) {
+      this.world.removeConstraint(end.pinConstraint);
+      end.pinConstraint = null;
+    }
+    const peg = this.pegsByPort.get(portId)!;
+    end.pegPortId = portId;
+    end.body.position.set(peg.world.x, PEG_TOP_Y, peg.world.z);
+    end.pinConstraint = this.pinEnd(end.body, peg.anchor);
+    for (const b of cable.bodies) {
+      b.allowSleep = true;
+      b.wakeUp();
+    }
+  }
+
+  // -------------------------------------------------------------------------
   // Input
   // -------------------------------------------------------------------------
 
@@ -893,6 +1065,13 @@ export class CableGame {
     this.updatePointer(e);
     const hit = this.pointerOnPlane();
     if (!hit) return;
+    this.lastPlanePoint.copy(hit);
+
+    // Wire Cutter armed: this tap cuts the nearest cable instead of grabbing.
+    if (this.cutMode) {
+      this.cutCableWorld(hit);
+      return;
+    }
 
     let best: { cable: Cable; end: CableEnd } | null = null;
     let bestDist = 1.2;
@@ -918,6 +1097,13 @@ export class CableGame {
       });
       this.callbacks.onDeny?.();
       return;
+    }
+
+    // Live wire: grabbing it while it still crosses another cable zaps you (+1 move).
+    if (best.cable.id === this.liveWireId && !this.isClear(best.cable)) {
+      this.moves++;
+      this.callbacks.onMove(this.moves);
+      this.callbacks.onZap?.();
     }
 
     this.callbacks.onGrab?.();
@@ -961,12 +1147,16 @@ export class CableGame {
     this.updatePointer(e);
     const hit = this.pointerOnPlane();
     if (!hit) return;
+    this.lastPlanePoint.copy(hit);
 
     if (this.dragControl) {
       // Move the cursor target; the joint drags the cable end toward it.
       this.dragControl.position.set(hit.x, PEG_TOP_Y + DRAG_LIFT, hit.z);
       return;
     }
+
+    // In cut mode the crosshair cursor stays; skip the grab-hover affordance.
+    if (this.cutMode) return;
 
     // Hover affordance: show a grab cursor near any movable plug.
     let near = false;
@@ -1080,6 +1270,8 @@ export class CableGame {
     this.updateConfetti(dt);
     this.updateDenyAnims(dt);
     this.updateIntro(dt);
+    this.updatePulsers();
+    if (this.blackout) this.updateFlashlight();
 
     this.renderer.render(this.scene, this.camera);
   };
@@ -1104,6 +1296,9 @@ export class CableGame {
   private checkClears(): void {
     for (const cable of this.cables) {
       if (cable.cleared || this.dragCable === cable) continue;
+      // Golden cable settles LAST: it refuses to resolve while other cables
+      // remain, even when its own path is clear.
+      if (cable.id === this.goldenId && this.cables.length > 1) continue;
       if (this.isClear(cable)) this.clearCable(cable);
     }
   }
@@ -1118,7 +1313,7 @@ export class CableGame {
     return true;
   }
 
-  private clearCable(cable: Cable): void {
+  private clearCable(cable: Cable, viaCut = false): void {
     cable.cleared = true;
     const anchor = this.pegsByPort.get(cable.ends[0].pegPortId)!.world.clone();
     const points = cable.bodies.map(
@@ -1145,12 +1340,17 @@ export class CableGame {
     this.spawnBurst(this.pegsByPort.get(cable.ends[0].pegPortId)!.world, cable.color);
     this.spawnBurst(this.pegsByPort.get(cable.ends[1].pegPortId)!.world, cable.color);
 
-    // Cascade chain: clears close together in time count as a chain, so the
-    // UI/audio can escalate (pop, pop+2 semitones, arpeggio...).
-    const CHAIN_WINDOW = 1.4;
-    this.chainIndex = this.elapsed - this.lastClearAt < CHAIN_WINDOW ? this.chainIndex + 1 : 0;
-    this.lastClearAt = this.elapsed;
-    this.callbacks.onClear?.(this.chainIndex);
+    if (viaCut) {
+      // A deliberate snip: no cascade escalation, its own dedicated feedback.
+      this.callbacks.onCut?.();
+    } else {
+      // Cascade chain: clears close together in time count as a chain, so the
+      // UI/audio can escalate (pop, pop+2 semitones, arpeggio...).
+      const CHAIN_WINDOW = 1.4;
+      this.chainIndex = this.elapsed - this.lastClearAt < CHAIN_WINDOW ? this.chainIndex + 1 : 0;
+      this.lastClearAt = this.elapsed;
+      this.callbacks.onClear?.(this.chainIndex);
+    }
 
     this.cables = this.cables.filter((c) => c !== cable);
     if (this.cables.length === 0) {
