@@ -242,7 +242,7 @@ function levelSpec(world: number, index: number): CustomSpec {
     // Locks appear from level 4 onward in worlds that have them.
     lockedEnds: index >= 4 ? Math.round(t.locksMax * k) : 0,
     // Boss levels get long, heavy "rats' nest" slack.
-    slack: isBoss ? 1.45 : undefined,
+    ...(isBoss ? { slack: 1.45 } : {}),
   };
 }
 

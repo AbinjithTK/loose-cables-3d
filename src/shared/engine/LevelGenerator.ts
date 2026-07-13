@@ -207,7 +207,7 @@ export function generateFromSpec(
     cables: cleanCables,
     emptyPortIds: [],
     optimalMoves: 0,
-    slack: spec.slack,
+    ...(spec.slack !== undefined ? { slack: spec.slack } : {}),
   };
 
   const scrambled = scramble(cleanDefinition, minCrossings, rng, minCrossings * 4 + 20);
