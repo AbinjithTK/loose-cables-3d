@@ -166,6 +166,92 @@ export type GenerateOptions = {
   scene?: SceneType;
 };
 
+/**
+ * Fully custom generation knobs — used by the campaign level table so every
+ * level is an individually tuned, deterministic seed instead of a preset tier.
+ */
+export type CustomSpec = {
+  gridWidth: number;
+  gridHeight: number;
+  cableCount: number;
+  minCrossings: number;
+  lockedEnds: number;
+  /** Cable slack multiplier for the renderer (1 = default; boss "rats' nest" cables use more). */
+  slack?: number;
+};
+
+export function generateFromSpec(
+  spec: CustomSpec,
+  seed: number,
+  name: string,
+  scene: SceneType,
+  difficulty: Difficulty = 'medium'
+): PuzzleDefinition {
+  const rng = new SeededRNG(seed);
+  const { gridWidth, gridHeight, cableCount, minCrossings } = spec;
+  const ports = buildGridPorts(gridWidth, gridHeight);
+
+  const cleanCables = buildCleanArrangement(gridWidth, gridHeight, cableCount, rng);
+  if (!cleanCables) {
+    throw new Error(`Grid ${gridWidth}x${gridHeight} cannot fit ${cableCount} cables`);
+  }
+
+  const cleanDefinition: PuzzleDefinition = {
+    version: PUZZLE_VERSION,
+    name,
+    difficulty,
+    scene,
+    gridWidth,
+    gridHeight,
+    ports,
+    cables: cleanCables,
+    emptyPortIds: [],
+    optimalMoves: 0,
+    ...(spec.slack !== undefined ? { slack: spec.slack } : {}),
+  };
+
+  const scrambled = scramble(cleanDefinition, minCrossings, rng, minCrossings * 4 + 20);
+
+  const definition: PuzzleDefinition = {
+    ...cleanDefinition,
+    cables: scrambled.cables,
+    emptyPortIds: scrambled.emptyPortIds,
+  };
+
+  if (spec.lockedEnds > 0) {
+    applyLocks(definition, scrambled.movedEnds, spec.lockedEnds, rng);
+  }
+
+  definition.optimalMoves = Math.max(1, scrambled.moveCount);
+  return definition;
+}
+
+/** Locks a subset of ends the scramble never moved (keeps solvability). */
+function applyLocks(
+  definition: PuzzleDefinition,
+  movedEnds: Set<string>,
+  lockedEnds: number,
+  rng: SeededRNG
+): void {
+  const lockable: Array<{ cableId: string; end: 'A' | 'B' }> = [];
+  for (const c of definition.cables) {
+    if (!movedEnds.has(`${c.id}:A`)) lockable.push({ cableId: c.id, end: 'A' });
+    if (!movedEnds.has(`${c.id}:B`)) lockable.push({ cableId: c.id, end: 'B' });
+  }
+  const byId = new Map(definition.cables.map((c) => [c.id, c]));
+  const lockedCables = new Set<string>();
+  let placed = 0;
+  for (const { cableId, end } of rng.shuffle(lockable)) {
+    if (placed >= lockedEnds) break;
+    if (lockedCables.has(cableId)) continue;
+    const c = byId.get(cableId)!;
+    if (end === 'A') c.lockA = true;
+    else c.lockB = true;
+    lockedCables.add(cableId);
+    placed++;
+  }
+}
+
 export function generatePuzzle(options: GenerateOptions): PuzzleDefinition {
   const spec = DIFFICULTY_SPECS[options.difficulty];
   const rng = new SeededRNG(options.seed);

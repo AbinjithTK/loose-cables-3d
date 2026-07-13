@@ -81,6 +81,16 @@ export type PuzzleDefinition = {
   emptyPortIds: number[];
   /** Minimum moves required to solve, computed at generation time. */
   optimalMoves: number;
+  /** Renderer cable slack multiplier (1 = default; boss levels use more). */
+  slack?: number;
+  /** W3+ mechanic: this cable must be cleared LAST or it re-tangles others. */
+  goldenCableId?: string;
+  /** W4+ mechanic: grabbing this cable while it crosses others zaps you (+1 move). */
+  liveWireCableId?: string;
+  /** W5+ mechanic: board is dark, a flashlight cone follows the pointer. */
+  blackout?: boolean;
+  /** W6 mechanic: a mid-level power surge swaps one cable's ends. */
+  surge?: boolean;
 };
 
 /**

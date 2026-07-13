@@ -2,7 +2,27 @@ import * as THREE from 'three';
 import * as CANNON from 'cannon-es';
 import type { PlugShape, PuzzleDefinition } from '../../shared/types';
 import { DEVICE_SPECS } from '../../shared/props';
+import type { WorldTheme } from '../../shared/levels/campaign';
 import { CABLE_RADIUS, FLOOR_GROUP, PEG_TOP_Y, cableGroupBit } from './config';
+
+/** Fallback visual theme (the original purple switchboard palette). */
+export const DEFAULT_THEME: Pick<
+  WorldTheme,
+  'sky' | 'fog' | 'panel' | 'chassis' | 'wall' | 'rim' | 'accent' | 'keyLight' | 'rimLightA' | 'rimLightB'
+> = {
+  sky: ['#3b2b8f', '#5a3aa8', '#123a6b'],
+  fog: '#241a52',
+  panel: '#191330',
+  chassis: '#2a1d63',
+  wall: '#5a3fb0',
+  rim: '#8a6fe6',
+  accent: '#25e6ff',
+  keyLight: '#ffffff',
+  rimLightA: '#ff3ea5',
+  rimLightB: '#27d3ff',
+};
+
+export type GameTheme = typeof DEFAULT_THEME;
 
 /**
  * CableGame — the 3D untangle game.
@@ -85,6 +105,14 @@ type Burst = {
 export type CableGameCallbacks = {
   onMove: (moves: number) => void;
   onWin: (moves: number) => void;
+  /** Plug picked up. */
+  onGrab?: () => void;
+  /** Grab attempt on a bolted (locked) end. */
+  onDeny?: () => void;
+  /** Plug seated in a new socket. */
+  onSnap?: () => void;
+  /** A cable cleared; chainIndex is 0 for the first in a cascade, 1, 2... for chained clears. */
+  onClear?: (chainIndex: number) => void;
 };
 
 function hexToNumber(hex: string): number {
@@ -116,6 +144,23 @@ export class CableGame {
   private physicsAccumulator = 0;
   private clearTimer = 0;
   private moves = 0;
+  private theme: GameTheme = DEFAULT_THEME;
+
+  /** Cascade chain tracking: clears within CHAIN_WINDOW of each other chain up. */
+  private lastClearAt = -Infinity;
+  private chainIndex = 0;
+  private elapsed = 0;
+
+  /** Deny-wiggle animations for bolted plugs. */
+  private denyAnims: Array<{ plug: THREE.Group; t: number; baseQuat: THREE.Quaternion }> = [];
+
+  /** Win confetti particles. */
+  private confetti: Array<{
+    mesh: THREE.Mesh;
+    vel: THREE.Vector3;
+    spin: THREE.Vector3;
+    t: number;
+  }> = [];
 
   // Intro: start with the door closed + camera pulled back, then swing the door
   // open and zoom into the board.
@@ -132,10 +177,16 @@ export class CableGame {
   private twistTex!: THREE.Texture;
   private canvas: HTMLCanvasElement;
 
-  constructor(canvas: HTMLCanvasElement, definition: PuzzleDefinition, callbacks: CableGameCallbacks) {
+  constructor(
+    canvas: HTMLCanvasElement,
+    definition: PuzzleDefinition,
+    callbacks: CableGameCallbacks,
+    theme: GameTheme = DEFAULT_THEME
+  ) {
     this.canvas = canvas;
     this.def = definition;
     this.callbacks = callbacks;
+    this.theme = theme;
 
     this.renderer = new THREE.WebGLRenderer({ antialias: true, canvas });
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio ?? 1, 2));
@@ -145,9 +196,9 @@ export class CableGame {
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
     this.renderer.toneMappingExposure = 1.05;
 
-    // Vibrant backdrop with distance fog for depth.
+    // Vibrant backdrop with distance fog for depth (themed per world).
     this.scene.background = this.buildBackground();
-    this.scene.fog = new THREE.Fog(0x241a52, 26, 54);
+    this.scene.fog = new THREE.Fog(hexToNumber(this.theme.fog), 26, 54);
 
     this.camera = new THREE.PerspectiveCamera(
       48,
@@ -252,10 +303,9 @@ export class CableGame {
     c.height = 256;
     const ctx = c.getContext('2d')!;
     const g = ctx.createLinearGradient(0, 0, 0, 256);
-    g.addColorStop(0, '#3b2b8f'); // violet
-    g.addColorStop(0.45, '#5a3aa8'); // purple
-    g.addColorStop(0.75, '#2d5fb0'); // blue
-    g.addColorStop(1, '#123a6b'); // deep blue
+    g.addColorStop(0, this.theme.sky[0]);
+    g.addColorStop(0.5, this.theme.sky[1]);
+    g.addColorStop(1, this.theme.sky[2]);
     ctx.fillStyle = g;
     ctx.fillRect(0, 0, 8, 256);
     const tex = new THREE.CanvasTexture(c);
@@ -270,7 +320,7 @@ export class CableGame {
     c.width = size;
     c.height = size;
     const ctx = c.getContext('2d')!;
-    ctx.fillStyle = '#191330';
+    ctx.fillStyle = this.theme.panel;
     ctx.fillRect(0, 0, size, size);
     // faint speckle for a matte surface (kept dark so cables pop)
     for (let i = 0; i < 2600; i++) {
@@ -298,7 +348,7 @@ export class CableGame {
   private setupLights(): void {
     this.scene.add(new THREE.AmbientLight(0xffffff, 0.5));
 
-    const key = new THREE.DirectionalLight(0xffffff, 1.2);
+    const key = new THREE.DirectionalLight(hexToNumber(this.theme.keyLight), 1.2);
     key.position.set(7, 20, 9);
     key.castShadow = true;
     key.shadow.mapSize.set(2048, 2048);
@@ -312,14 +362,14 @@ export class CableGame {
     key.shadow.camera.bottom = -s;
     this.scene.add(key);
 
-    // Colored rim lights for a lively, saturated look.
-    const magenta = new THREE.PointLight(0xff3ea5, 0.9, 50, 2);
-    magenta.position.set(-11, 8, 6);
-    this.scene.add(magenta);
+    // Colored rim lights for a lively, saturated look (themed per world).
+    const rimA = new THREE.PointLight(hexToNumber(this.theme.rimLightA), 0.9, 50, 2);
+    rimA.position.set(-11, 8, 6);
+    this.scene.add(rimA);
 
-    const cyan = new THREE.PointLight(0x27d3ff, 0.9, 50, 2);
-    cyan.position.set(11, 8, -6);
-    this.scene.add(cyan);
+    const rimB = new THREE.PointLight(hexToNumber(this.theme.rimLightB), 0.9, 50, 2);
+    rimB.position.set(11, 8, -6);
+    this.scene.add(rimB);
 
     const gold = new THREE.PointLight(0xffd27a, 0.5, 45, 2);
     gold.position.set(0, 10, 10);
@@ -363,15 +413,15 @@ export class CableGame {
     const outerW = w + wallT * 2;
     const outerH = h + wallT * 2;
 
-    const chassisMat = new THREE.MeshStandardMaterial({ color: 0x2a1d63, roughness: 0.6, metalness: 0.45 });
-    const wallMat = new THREE.MeshStandardMaterial({ color: 0x5a3fb0, roughness: 0.45, metalness: 0.6 });
-    const rimMat = new THREE.MeshStandardMaterial({ color: 0x8a6fe6, roughness: 0.3, metalness: 0.85 });
+    const chassisMat = new THREE.MeshStandardMaterial({ color: hexToNumber(this.theme.chassis), roughness: 0.6, metalness: 0.45 });
+    const wallMat = new THREE.MeshStandardMaterial({ color: hexToNumber(this.theme.wall), roughness: 0.45, metalness: 0.6 });
+    const rimMat = new THREE.MeshStandardMaterial({ color: hexToNumber(this.theme.rim), roughness: 0.3, metalness: 0.85 });
     const accentMat = new THREE.MeshStandardMaterial({
-      color: 0x25e6ff,
+      color: hexToNumber(this.theme.accent),
       roughness: 0.35,
       metalness: 0.4,
-      emissive: 0x18b6d6,
-      emissiveIntensity: 0.9,
+      emissive: hexToNumber(this.theme.accent),
+      emissiveIntensity: 0.7,
     });
     const screwMat = new THREE.MeshStandardMaterial({ color: 0xffd27a, roughness: 0.25, metalness: 0.95 });
 
@@ -473,7 +523,7 @@ export class CableGame {
     lid.position.z = h / 2 + 0.15; // spans back across the board from the hinge
 
     const metalMat = new THREE.MeshStandardMaterial({
-      color: 0x4a3a95,
+      color: hexToNumber(this.theme.wall),
       roughness: 0.4,
       metalness: 0.75,
     });
@@ -483,7 +533,7 @@ export class CableGame {
     lid.add(panel);
 
     // Raised rim border.
-    const rimMat = new THREE.MeshStandardMaterial({ color: 0x6a5ac8, roughness: 0.35, metalness: 0.82 });
+    const rimMat = new THREE.MeshStandardMaterial({ color: hexToNumber(this.theme.rim), roughness: 0.35, metalness: 0.82 });
     const rim = new THREE.Mesh(new THREE.BoxGeometry(w + 0.6, 0.1, h + 0.6), rimMat);
     rim.position.y = -0.06;
     lid.add(rim);
@@ -635,7 +685,8 @@ export class CableGame {
     // Length is proportional to the actual span so cables stretch across the
     // board (crossing others) instead of coiling up next to their own sockets.
     const straight = pegA.world.distanceTo(pegB.world);
-    const restLength = Math.max(straight * CABLE_SLACK, SPACING);
+    const slackMul = CABLE_SLACK * (this.def.slack ?? 1);
+    const restLength = Math.max(straight * slackMul, SPACING);
     const segCount = Math.max(6, Math.round(restLength / SEG_DIST));
 
     const bodies: CANNON.Body[] = [];
@@ -848,7 +899,6 @@ export class CableGame {
     for (const cable of this.cables) {
       if (cable.cleared) continue;
       for (const end of cable.ends) {
-        if (end.locked) continue; // bolted down — can't be grabbed
         const p = end.body.position;
         const d = Math.hypot(p.x - hit.x, p.z - hit.z);
         if (d < bestDist) {
@@ -859,6 +909,18 @@ export class CableGame {
     }
     if (!best) return;
 
+    // Bolted end: deny with a struggle-wiggle + camera nudge instead of a grab.
+    if (best.end.locked) {
+      this.denyAnims.push({
+        plug: best.end.plug,
+        t: 0,
+        baseQuat: best.end.plug.quaternion.clone(),
+      });
+      this.callbacks.onDeny?.();
+      return;
+    }
+
+    this.callbacks.onGrab?.();
     this.dragCable = best.cable;
     this.dragEnd = best.end;
     const body = best.end.body;
@@ -896,12 +958,31 @@ export class CableGame {
   };
 
   private onPointerMove = (e: PointerEvent): void => {
-    if (!this.dragControl) return;
     this.updatePointer(e);
     const hit = this.pointerOnPlane();
     if (!hit) return;
-    // Move the cursor target; the joint drags the cable end toward it.
-    this.dragControl.position.set(hit.x, PEG_TOP_Y + DRAG_LIFT, hit.z);
+
+    if (this.dragControl) {
+      // Move the cursor target; the joint drags the cable end toward it.
+      this.dragControl.position.set(hit.x, PEG_TOP_Y + DRAG_LIFT, hit.z);
+      return;
+    }
+
+    // Hover affordance: show a grab cursor near any movable plug.
+    let near = false;
+    for (const cable of this.cables) {
+      if (cable.cleared) continue;
+      for (const end of cable.ends) {
+        if (end.locked) continue;
+        const p = end.body.position;
+        if (Math.hypot(p.x - hit.x, p.z - hit.z) < 1.2) {
+          near = true;
+          break;
+        }
+      }
+      if (near) break;
+    }
+    this.canvas.style.cursor = near ? 'grab' : 'default';
   };
 
   private onPointerUp = (): void => {
@@ -946,6 +1027,7 @@ export class CableGame {
     if (targetPort !== end.pegPortId) {
       this.moves++;
       this.callbacks.onMove(this.moves);
+      this.callbacks.onSnap?.();
     }
     end.pegPortId = targetPort;
     const peg = this.pegsByPort.get(targetPort)!;
@@ -991,9 +1073,12 @@ export class CableGame {
       this.updatePlug(cable, cable.ends[1]);
     }
 
+    this.elapsed += dt;
     if (++this.clearTimer % 6 === 0) this.checkClears();
     this.updateRetracting(dt);
     this.updateBursts(dt);
+    this.updateConfetti(dt);
+    this.updateDenyAnims(dt);
     this.updateIntro(dt);
 
     this.renderer.render(this.scene, this.camera);
@@ -1060,8 +1145,77 @@ export class CableGame {
     this.spawnBurst(this.pegsByPort.get(cable.ends[0].pegPortId)!.world, cable.color);
     this.spawnBurst(this.pegsByPort.get(cable.ends[1].pegPortId)!.world, cable.color);
 
+    // Cascade chain: clears close together in time count as a chain, so the
+    // UI/audio can escalate (pop, pop+2 semitones, arpeggio...).
+    const CHAIN_WINDOW = 1.4;
+    this.chainIndex = this.elapsed - this.lastClearAt < CHAIN_WINDOW ? this.chainIndex + 1 : 0;
+    this.lastClearAt = this.elapsed;
+    this.callbacks.onClear?.(this.chainIndex);
+
     this.cables = this.cables.filter((c) => c !== cable);
-    if (this.cables.length === 0) this.callbacks.onWin(this.moves);
+    if (this.cables.length === 0) {
+      this.spawnConfetti();
+      this.callbacks.onWin(this.moves);
+    }
+  }
+
+  /** Win celebration: a burst of tiny colored "plugs" raining over the board. */
+  private spawnConfetti(): void {
+    const colors = this.def.cables.map((c) => hexToNumber(c.color));
+    const geo = new THREE.BoxGeometry(0.16, 0.06, 0.24);
+    for (let i = 0; i < 70; i++) {
+      const mat = new THREE.MeshBasicMaterial({
+        color: colors[i % colors.length]!,
+        transparent: true,
+        fog: false,
+      });
+      const mesh = new THREE.Mesh(geo.clone(), mat);
+      mesh.position.set((Math.random() - 0.5) * 6, 6 + Math.random() * 3, (Math.random() - 0.5) * 6);
+      mesh.rotation.set(Math.random() * Math.PI, Math.random() * Math.PI, 0);
+      this.scene.add(mesh);
+      this.confetti.push({
+        mesh,
+        vel: new THREE.Vector3((Math.random() - 0.5) * 3, -2 - Math.random() * 2, (Math.random() - 0.5) * 3),
+        spin: new THREE.Vector3(Math.random() * 6, Math.random() * 6, Math.random() * 6),
+        t: 0,
+      });
+    }
+  }
+
+  private updateConfetti(dt: number): void {
+    for (const p of [...this.confetti]) {
+      p.t += dt;
+      p.vel.y -= 5 * dt;
+      p.mesh.position.addScaledVector(p.vel, dt);
+      p.mesh.rotation.x += p.spin.x * dt;
+      p.mesh.rotation.y += p.spin.y * dt;
+      p.mesh.rotation.z += p.spin.z * dt;
+      const mat = p.mesh.material as THREE.MeshBasicMaterial;
+      mat.opacity = Math.max(0, 1 - p.t / 2.2);
+      if (p.t >= 2.2 || p.mesh.position.y < -2) {
+        this.scene.remove(p.mesh);
+        p.mesh.geometry.dispose();
+        mat.dispose();
+        this.confetti = this.confetti.filter((x) => x !== p);
+      }
+    }
+  }
+
+  /** Struggle-wiggle on a bolted plug that was grabbed: fast decaying shake. */
+  private updateDenyAnims(dt: number): void {
+    for (const anim of [...this.denyAnims]) {
+      anim.t += dt;
+      const dur = 0.4;
+      if (anim.t >= dur) {
+        anim.plug.quaternion.copy(anim.baseQuat);
+        this.denyAnims = this.denyAnims.filter((x) => x !== anim);
+        continue;
+      }
+      const decay = 1 - anim.t / dur;
+      const angle = Math.sin(anim.t * 55) * 0.16 * decay;
+      const q = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), angle);
+      anim.plug.quaternion.copy(anim.baseQuat).multiply(q);
+    }
   }
 
   private spawnBurst(pos: THREE.Vector3, color: number): void {
