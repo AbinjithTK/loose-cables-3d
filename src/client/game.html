@@ -25,9 +25,43 @@
         <p>Untangling&hellip;</p>
       </div>
 
+      <!-- ============ HOME / MENU ============ -->
+      <div id="screen-home" class="screen" hidden>
+        <button id="home-mute-btn" class="icon-btn home-mute" type="button" aria-label="Toggle sound">&#9835;</button>
+        <div class="home-inner">
+          <div class="home-logo">
+            <div class="home-logo-badge">&#128268;</div>
+            <h1 class="home-title">LOOSE <span>CABLES</span></h1>
+            <p class="home-tagline">Untangle the mess. Climb the tower.</p>
+          </div>
+
+          <div class="home-user">
+            <span class="home-avatar" id="home-avatar">?</span>
+            <div class="home-user-text">
+              <span class="home-greeting">Welcome,</span>
+              <strong class="home-username" id="home-username">u/you</strong>
+            </div>
+          </div>
+
+          <div class="home-stats">
+            <div class="home-stat"><span class="hs-num" id="home-stars">0</span><span class="hs-cap">&#9733; Stars</span></div>
+            <div class="home-stat"><span class="hs-num" id="home-streak">0</span><span class="hs-cap">&#128293; Streak</span></div>
+            <div class="home-stat"><span class="hs-num" id="home-ties">0</span><span class="hs-cap">&#128279; Ties</span></div>
+          </div>
+
+          <div class="home-actions">
+            <button id="home-play-btn" class="btn big" type="button">Continue</button>
+            <button id="home-daily-btn" class="btn ghost" type="button">Today&apos;s Tangle</button>
+          </div>
+
+          <p class="home-progress" id="home-progress"></p>
+        </div>
+      </div>
+
       <!-- ============ CABLE TOWER MAP ============ -->
       <div id="screen-map" class="screen" hidden>
         <header class="map-header">
+          <button id="map-home-btn" class="icon-btn" type="button" aria-label="Back to menu">&#8962;</button>
           <h1 class="map-title">Loose <span>Cables</span></h1>
           <div style="display: flex; align-items: center; gap: 8px">
             <div class="wallet" id="wallet-stars" title="Total stars">&#9733; <span id="total-stars">0</span></div>

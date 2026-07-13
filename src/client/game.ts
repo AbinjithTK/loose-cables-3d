@@ -13,6 +13,7 @@ import {
   WORLDS,
   generateCampaignLevel,
   getLevel,
+  nextLevelId,
   starsForClear,
   timeBonusTies,
   type CampaignLevel,
@@ -25,6 +26,8 @@ import type {
   InitResponse,
   LevelCompleteResponse,
   PlayerProfile,
+  RosterEntry,
+  RosterResponse,
   ToolSpendResponse,
 } from '../shared/api';
 import {
@@ -43,9 +46,22 @@ import { audio } from './audio/AudioBus';
 const $ = <T extends HTMLElement>(id: string): T => document.getElementById(id) as T;
 
 const screenLoading = $<HTMLDivElement>('screen-loading');
+const screenHome = $<HTMLDivElement>('screen-home');
 const screenMap = $<HTMLDivElement>('screen-map');
 const screenPlay = $<HTMLDivElement>('screen-play');
 const canvas = $<HTMLCanvasElement>('game-canvas');
+
+// Home / menu
+const homeUsernameEl = $<HTMLElement>('home-username');
+const homeAvatarEl = $<HTMLSpanElement>('home-avatar');
+const homeStarsEl = $<HTMLSpanElement>('home-stars');
+const homeStreakEl = $<HTMLSpanElement>('home-streak');
+const homeTiesEl = $<HTMLSpanElement>('home-ties');
+const homeProgressEl = $<HTMLParagraphElement>('home-progress');
+const homePlayBtn = $<HTMLButtonElement>('home-play-btn');
+const homeDailyBtn = $<HTMLButtonElement>('home-daily-btn');
+const homeMuteBtn = $<HTMLButtonElement>('home-mute-btn');
+const mapHomeBtn = $<HTMLButtonElement>('map-home-btn');
 
 const totalStarsEl = $<HTMLSpanElement>('total-stars');
 const totalTiesEl = $<HTMLSpanElement>('total-ties');
@@ -127,6 +143,9 @@ let serverAvailable = false;
 let dailyDate = new Date().toISOString().slice(0, 10);
 let dailyDone = false;
 
+// Other players and where they left off (keyed by levelId for map pins).
+let rosterByLevel = new Map<string, RosterEntry[]>();
+
 let game: CableGame | null = null;
 let mode: Mode | null = null;
 let currentPar = 0;
@@ -161,7 +180,7 @@ const WIN_FLAVOR = [
 // ---------------------------------------------------------------------------
 
 function showScreen(el: HTMLDivElement): void {
-  for (const s of [screenLoading, screenMap, screenPlay]) s.hidden = s !== el;
+  for (const s of [screenLoading, screenHome, screenMap, screenPlay]) s.hidden = s !== el;
   // Retrigger the enter transition on every swap.
   el.classList.remove('enter');
   void el.offsetWidth; // reflow so the animation restarts
@@ -270,12 +289,42 @@ function starGlyphs(stars: number): string {
 
 /** The next uncleared, unlocked campaign level (for the "current" pulse). */
 function currentLevelId(): string | null {
-  for (const level of CAMPAIGN) {
-    const world = WORLDS[level.world - 1]!;
-    if (profile.totalStars < world.gateStars) continue;
-    if (!profile.levels[level.id]) return level.id;
+  return nextLevelId(new Set(Object.keys(profile.levels)), profile.totalStars);
+}
+
+// ---------------------------------------------------------------------------
+// Reddit identity + social roster
+// ---------------------------------------------------------------------------
+
+/** A stable, pleasant color derived from a username. */
+function userColor(name: string): string {
+  let h = 0;
+  for (let i = 0; i < name.length; i++) h = (h * 31 + name.charCodeAt(i)) % 360;
+  return `hsl(${h}, 70%, 62%)`;
+}
+
+function displayName(): string {
+  const u = profile.username;
+  return !u || u === 'you' || u === 'anonymous' ? 'guest' : u;
+}
+
+async function fetchRoster(): Promise<void> {
+  rosterByLevel = new Map();
+  if (!serverAvailable) return;
+  try {
+    const res = await fetch('/api/roster');
+    if (!res.ok) return;
+    const data = (await res.json()) as RosterResponse;
+    if (data.type !== 'roster') return;
+    for (const p of data.players) {
+      if (!p.levelId) continue;
+      const list = rosterByLevel.get(p.levelId) ?? [];
+      list.push(p);
+      rosterByLevel.set(p.levelId, list);
+    }
+  } catch {
+    /* roster is best-effort */
   }
-  return null;
 }
 
 /** Update a wallet counter, bumping its pill when the value increases. */
@@ -364,6 +413,30 @@ function renderMap(): void {
       });
 
       row.appendChild(node);
+
+      // Social pins: other players currently sitting on this level.
+      const here = rosterByLevel.get(level.id);
+      if (here && here.length > 0) {
+        const pins = document.createElement('div');
+        pins.className = 'player-pins';
+        for (const p of here.slice(0, 3)) {
+          const pin = document.createElement('span');
+          pin.className = 'player-pin';
+          pin.style.background = userColor(p.username);
+          pin.textContent = p.username.slice(0, 1);
+          pin.title = `u/${p.username} \u2022 \u2605 ${p.totalStars}`;
+          pins.appendChild(pin);
+        }
+        if (here.length > 3) {
+          const more = document.createElement('span');
+          more.className = 'player-pin more';
+          more.textContent = `+${here.length - 3}`;
+          more.title = here.slice(3).map((p) => `u/${p.username}`).join(', ');
+          pins.appendChild(more);
+        }
+        row.appendChild(pins);
+      }
+
       road.appendChild(row);
     });
 
@@ -391,6 +464,47 @@ function renderMap(): void {
   }
 }
 
+function renderHome(): void {
+  homeUsernameEl.textContent = `u/${displayName()}`;
+  homeAvatarEl.textContent = displayName().slice(0, 1);
+  homeStarsEl.textContent = String(profile.totalStars);
+  homeStreakEl.textContent = String(profile.streak);
+  homeTiesEl.textContent = String(profile.zipTies);
+
+  const cur = currentLevelId();
+  const anyProgress = Object.keys(profile.levels).length > 0;
+  if (!cur) {
+    homePlayBtn.textContent = 'Play Again';
+    homeProgressEl.textContent = 'You cleared the whole tower. Legend.';
+  } else {
+    const level = getLevel(cur)!;
+    const world = WORLDS[level.world - 1]!;
+    homePlayBtn.textContent = anyProgress ? 'Continue' : 'Start Playing';
+    homeProgressEl.textContent = anyProgress
+      ? `Next up: ${world.name} \u2022 ${level.name}`
+      : `Begin in ${world.name}`;
+  }
+  homeDailyBtn.textContent = dailyDone ? 'Daily Done \u2713' : "Today's Tangle";
+  homeDailyBtn.disabled = dailyDone;
+}
+
+function showHome(): void {
+  stopLevelTimer();
+  disarmCut();
+  disposeGame();
+  winOverlay.hidden = true;
+  gameoverOverlay.hidden = true;
+  tutorialOverlay.hidden = true;
+  renderHome();
+  showScreen(screenHome);
+}
+
+/** Refresh the social roster in the background, then re-render the map pins. */
+async function refreshRosterAndMap(): Promise<void> {
+  await fetchRoster();
+  if (!screenMap.hidden) renderMap();
+}
+
 function showMap(): void {
   stopLevelTimer();
   disarmCut();
@@ -399,6 +513,7 @@ function showMap(): void {
   gameoverOverlay.hidden = true;
   tutorialOverlay.hidden = true;
   renderMap();
+  void refreshRosterAndMap();
   showScreen(screenMap);
   // Scroll to the current level's world (bottom = world 1). Scroll ONLY the
   // tower container — scrollIntoView would also scroll the overflow:hidden
@@ -1078,10 +1193,33 @@ dailyBtn.addEventListener('click', () => {
   startDaily();
 });
 
-muteBtn.addEventListener('click', () => {
+function toggleMute(): void {
   audio.setMuted(!audio.muted);
-  muteBtn.textContent = audio.muted ? '\u{1D13D}' : '\u266B';
-  muteBtn.setAttribute('aria-label', audio.muted ? 'Unmute sound' : 'Mute sound');
+  const glyph = audio.muted ? '\u{1D13D}' : '\u266B';
+  const label = audio.muted ? 'Unmute sound' : 'Mute sound';
+  for (const b of [muteBtn, homeMuteBtn]) {
+    b.textContent = glyph;
+    b.setAttribute('aria-label', label);
+  }
+}
+
+muteBtn.addEventListener('click', toggleMute);
+homeMuteBtn.addEventListener('click', toggleMute);
+
+mapHomeBtn.addEventListener('click', () => {
+  audio.play('sfx_ui_tap');
+  showHome();
+});
+
+homePlayBtn.addEventListener('click', () => {
+  audio.play('sfx_ui_tap');
+  showMap();
+});
+
+homeDailyBtn.addEventListener('click', () => {
+  if (dailyDone) return;
+  audio.play('sfx_ui_tap');
+  startDaily();
 });
 
 // ---------------------------------------------------------------------------
@@ -1091,7 +1229,8 @@ muteBtn.addEventListener('click', () => {
 async function boot(): Promise<void> {
   showScreen(screenLoading);
   await serverInit();
-  showMap();
+  await fetchRoster();
+  showHome();
 }
 
 void boot();

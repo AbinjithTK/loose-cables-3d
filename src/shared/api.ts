@@ -87,6 +87,20 @@ export type ToolSpendResponse = {
   profile: PlayerProfile;
 };
 
+/** One other player's public progress, for the social road map. */
+export type RosterEntry = {
+  username: string;
+  /** The level id they're currently sitting on (where they left off), or null if finished. */
+  levelId: string | null;
+  totalStars: number;
+};
+
+export type RosterResponse = {
+  type: 'roster';
+  /** Other players (self excluded), most-recently-active first. */
+  players: RosterEntry[];
+};
+
 export type ErrorResponse = {
   status: 'error';
   message: string;

@@ -390,6 +390,20 @@ export function timeBonusTies(timeLeftSec: number, timeLimit: number): number {
   return timeLimit > 0 && timeLeftSec / timeLimit > 0.5 ? 1 : 0;
 }
 
+/**
+ * The next uncleared, unlocked campaign level for a player — i.e. where they
+ * "left off". Shared by the client (current-level pulse) and the server
+ * (social roster). Returns null when the whole campaign is cleared.
+ */
+export function nextLevelId(clearedIds: Set<string>, totalStars: number): string | null {
+  for (const level of CAMPAIGN) {
+    const world = WORLDS[level.world - 1]!;
+    if (totalStars < world.gateStars) continue;
+    if (!clearedIds.has(level.id)) return level.id;
+  }
+  return null;
+}
+
 export const MAX_STARS = CAMPAIGN.length * 3;
 
 /** Total stars needed to unlock each world (index 0 = world 1). */

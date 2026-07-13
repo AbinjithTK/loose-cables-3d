@@ -10,12 +10,15 @@ import type {
   LevelCompleteResponse,
   LevelProgress,
   PlayerProfile,
+  RosterEntry,
+  RosterResponse,
   ToolSpendRequest,
   ToolSpendResponse,
 } from '../../shared/api';
 import {
   generateCampaignLevel,
   getLevel,
+  nextLevelId,
   starsForClear,
   timeBonusTies,
   zipTiesForClear,
@@ -70,6 +73,34 @@ function recomputeStars(profile: PlayerProfile): void {
   profile.totalStars = Object.values(profile.levels).reduce((n, l) => n + l.stars, 0);
 }
 
+// ---------------------------------------------------------------------------
+// Social roster — track where each player left off (bounded, recency-ordered)
+// ---------------------------------------------------------------------------
+
+const ROSTER_RECENT = 'roster:recent'; // sorted set: member=username, score=lastActive ms
+const ROSTER_POS = 'roster:pos'; // hash: username -> JSON { levelId, totalStars }
+const ROSTER_CAP = 200; // keep only the most-recent N players
+
+/** Upsert a player's public position (their current level) into the roster. */
+async function recordPresence(profile: PlayerProfile): Promise<void> {
+  if (profile.username === 'anonymous') return;
+  const cleared = new Set(Object.keys(profile.levels));
+  const levelId = nextLevelId(cleared, profile.totalStars);
+  try {
+    await redis.zAdd(ROSTER_RECENT, { member: profile.username, score: Date.now() });
+    await redis.hSet(ROSTER_POS, {
+      [profile.username]: JSON.stringify({ levelId, totalStars: profile.totalStars }),
+    });
+    // Trim to the most-recent ROSTER_CAP players (lowest scores = oldest).
+    const size = await redis.zCard(ROSTER_RECENT);
+    if (size > ROSTER_CAP) {
+      await redis.zRemRangeByRank(ROSTER_RECENT, 0, size - ROSTER_CAP - 1);
+    }
+  } catch {
+    // Presence is best-effort; never fail the main request over it.
+  }
+}
+
 async function currentUsername(): Promise<string> {
   const username = await reddit.getCurrentUsername();
   return username ?? 'anonymous';
@@ -87,6 +118,7 @@ api.get('/init', async (c) => {
   try {
     const username = await currentUsername();
     const profile = await loadProfile(username);
+    await recordPresence(profile);
     const dailyDate = todayIso();
     return c.json<InitResponse>({
       type: 'init',
@@ -149,6 +181,7 @@ api.post('/level-complete', async (c) => {
       profile.tools.cutter += reward.cutter;
     }
     await saveProfile(profile);
+    await recordPresence(profile);
 
     return c.json<LevelCompleteResponse>({
       type: 'level-complete',
@@ -283,6 +316,38 @@ api.post('/tool-spend', async (c) => {
     return c.json<ToolSpendResponse>({ type: 'tool-spend', profile });
   } catch (error) {
     const message = error instanceof Error ? error.message : 'tool-spend failed';
+    return c.json<ErrorResponse>({ status: 'error', message }, 400);
+  }
+});
+
+api.get('/roster', async (c) => {
+  try {
+    const me = await currentUsername();
+    // Most-recent players sit at the top of the score range.
+    const size = await redis.zCard(ROSTER_RECENT);
+    if (!size) return c.json<RosterResponse>({ type: 'roster', players: [] });
+    const start = Math.max(0, size - 60);
+    const recent = await redis.zRange(ROSTER_RECENT, start, size - 1, { by: 'rank' });
+    // recent is ascending by score (oldest -> newest); reverse for newest-first.
+    const names = recent.map((e) => (typeof e === 'string' ? e : e.member)).reverse();
+
+    const posRaw = await redis.hGetAll(ROSTER_POS);
+    const players: RosterEntry[] = [];
+    for (const name of names) {
+      if (name === me) continue;
+      const raw = posRaw?.[name];
+      if (!raw) continue;
+      try {
+        const pos = JSON.parse(raw) as { levelId: string | null; totalStars: number };
+        players.push({ username: name, levelId: pos.levelId, totalStars: pos.totalStars });
+      } catch {
+        /* skip malformed */
+      }
+      if (players.length >= 30) break;
+    }
+    return c.json<RosterResponse>({ type: 'roster', players });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'roster failed';
     return c.json<ErrorResponse>({ status: 'error', message }, 400);
   }
 });

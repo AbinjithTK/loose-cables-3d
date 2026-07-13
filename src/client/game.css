@@ -1583,3 +1583,221 @@ button {
 .ach-chip .ach-chip-badge {
   font-size: 13px;
 }
+
+/* ================================== */
+/* Home / menu screen                 */
+/* ================================== */
+
+#screen-home {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background:
+    radial-gradient(120% 90% at 50% -10%, rgba(255, 176, 46, 0.16), transparent 60%),
+    radial-gradient(120% 90% at 50% 110%, rgba(77, 216, 192, 0.12), transparent 60%),
+    var(--bg-deep, #12101a);
+}
+
+.home-mute {
+  position: absolute;
+  top: 14px;
+  right: 14px;
+  z-index: 3;
+}
+
+.home-inner {
+  width: min(420px, 100%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 22px;
+  text-align: center;
+}
+
+.home-logo-badge {
+  font-size: 52px;
+  filter: drop-shadow(0 6px 18px rgba(255, 176, 46, 0.4));
+  animation: home-badge-float 3.4s ease-in-out infinite;
+}
+
+@keyframes home-badge-float {
+  0%, 100% { transform: translateY(0) rotate(-6deg); }
+  50% { transform: translateY(-8px) rotate(6deg); }
+}
+
+.home-title {
+  margin: 6px 0 2px;
+  font-size: 40px;
+  font-weight: 900;
+  letter-spacing: 1px;
+  line-height: 1;
+  color: var(--text, #f2f0f7);
+}
+
+.home-title span {
+  color: var(--accent, #ffb02e);
+}
+
+.home-tagline {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 700;
+  color: rgba(242, 240, 247, 0.6);
+}
+
+.home-user {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 18px 10px 10px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.home-avatar {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  font-weight: 900;
+  font-size: 18px;
+  color: #12101a;
+  background: linear-gradient(180deg, #ffd97a, var(--accent, #ffb02e));
+  text-transform: uppercase;
+}
+
+.home-user-text {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  line-height: 1.15;
+}
+
+.home-greeting {
+  font-size: 11px;
+  font-weight: 700;
+  color: rgba(242, 240, 247, 0.5);
+}
+
+.home-username {
+  font-size: 16px;
+  font-weight: 900;
+  color: var(--text, #f2f0f7);
+}
+
+.home-stats {
+  display: flex;
+  gap: 10px;
+  width: 100%;
+}
+
+.home-stat {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 12px 6px;
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.045);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.hs-num {
+  font-size: 22px;
+  font-weight: 900;
+  color: var(--accent, #ffb02e);
+  font-variant-numeric: tabular-nums;
+}
+
+.hs-cap {
+  font-size: 11px;
+  font-weight: 700;
+  color: rgba(242, 240, 247, 0.55);
+}
+
+.home-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  width: 100%;
+}
+
+.btn.big {
+  font-size: 18px;
+  padding: 16px;
+  border-radius: 16px;
+}
+
+.home-progress {
+  margin: 0;
+  font-size: 12.5px;
+  font-weight: 700;
+  color: rgba(242, 240, 247, 0.5);
+  min-height: 16px;
+}
+
+/* ================================== */
+/* Road-map player pins (other users) */
+/* ================================== */
+
+.level-row {
+  position: relative;
+}
+
+.player-pins {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  pointer-events: none;
+}
+
+.level-row.left .player-pins { left: calc(50% + 46px); }
+.level-row.right .player-pins { right: calc(50% + 46px); flex-direction: row-reverse; }
+.level-row.mid .player-pins { left: calc(50% + 46px); }
+
+.player-pin {
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  font-size: 11px;
+  font-weight: 900;
+  color: #0c0a14;
+  border: 2px solid rgba(18, 16, 26, 0.85);
+  text-transform: uppercase;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.45);
+  margin-left: -8px;
+  animation: pin-pop 0.3s ease both;
+}
+
+.level-row.right .player-pin { margin-left: 0; margin-right: -8px; }
+
+.player-pin.more {
+  background: rgba(255, 255, 255, 0.16);
+  color: var(--text, #f2f0f7);
+  font-size: 10px;
+}
+
+@keyframes pin-pop {
+  from { transform: scale(0); }
+  to { transform: scale(1); }
+}
+
+.player-pin-label {
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: rgba(18, 16, 26, 0.9);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  font-size: 10.5px;
+  font-weight: 800;
+  color: rgba(242, 240, 247, 0.75);
+  white-space: nowrap;
+  margin-left: 2px;
+}
