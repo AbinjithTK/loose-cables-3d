@@ -1086,6 +1086,445 @@ button {
   color: var(--muted);
 }
 
+/* ---------------------------------- */
+/* Countdown timer pill               */
+/* ---------------------------------- */
+
+.hud-timer {
+  min-width: 84px;
+  justify-content: center;
+  transition: background 0.3s ease;
+}
+
+.hud-timer .timer-icon {
+  font-size: 14px;
+}
+
+.hud-timer .value {
+  font-variant-numeric: tabular-nums;
+  min-width: 44px;
+  text-align: center;
+}
+
+/* <= 30s: amber gentle pulse */
+.hud-timer.warn {
+  background: rgba(255, 176, 46, 0.16);
+  border-color: rgba(255, 176, 46, 0.5);
+}
+
+.hud-timer.warn .value {
+  color: var(--gold);
+  animation: timer-pulse 1s ease-in-out infinite;
+}
+
+/* <= 10s: red hard pulse */
+.hud-timer.critical {
+  background: rgba(255, 93, 115, 0.2);
+  border-color: var(--danger);
+}
+
+.hud-timer.critical .value {
+  color: var(--danger);
+  animation: timer-pulse 0.5s ease-in-out infinite;
+}
+
+@keyframes timer-pulse {
+  0%,
+  100% {
+    transform: scale(1);
+  }
+  50% {
+    transform: scale(1.14);
+  }
+}
+
+/* Frozen: ice blue with shimmer */
+.hud-timer.frozen {
+  background: rgba(160, 220, 255, 0.22);
+  border-color: #a0dcff;
+}
+
+.hud-timer.frozen .value {
+  color: #d2eeff;
+  animation: none;
+  text-shadow: 0 0 8px rgba(160, 220, 255, 0.9);
+}
+
+/* Red screen-edge glow when time is critical */
+#screen-play.time-critical::after {
+  background:
+    radial-gradient(ellipse at center, transparent 66%, rgba(6, 3, 18, 0.32) 100%),
+    radial-gradient(ellipse at center, transparent 72%, rgba(255, 40, 60, 0.28) 100%);
+  animation: edge-throb 0.6s ease-in-out infinite;
+}
+
+@keyframes edge-throb {
+  0%,
+  100% {
+    opacity: 0.7;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+/* White flash for live-wire zaps */
+.zap-flash {
+  position: absolute;
+  inset: 0;
+  background: #fff;
+  opacity: 0;
+  pointer-events: none;
+  z-index: 8;
+}
+
+.zap-flash.on {
+  animation: zap-flash 0.16s ease-out;
+}
+
+@keyframes zap-flash {
+  0% {
+    opacity: 0.75;
+  }
+  100% {
+    opacity: 0;
+  }
+}
+
+/* ---------------------------------- */
+/* Toolbar (Time Freeze / Wire Cutter)*/
+/* ---------------------------------- */
+
+.toolbar {
+  position: absolute;
+  left: 12px;
+  bottom: 14px;
+  display: flex;
+  gap: 10px;
+  z-index: 5;
+}
+
+.tool-btn {
+  position: relative;
+  width: 54px;
+  height: 54px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--panel);
+  border: 2px solid rgba(255, 255, 255, 0.18);
+  box-shadow: 0 4px 0 rgba(0, 0, 0, 0.35);
+  transition:
+    transform 0.12s ease,
+    border-color 0.15s ease;
+}
+
+.tool-btn:hover {
+  transform: scale(1.08);
+  border-color: var(--accent);
+}
+
+.tool-btn:active {
+  transform: scale(0.94);
+}
+
+.tool-btn:disabled {
+  opacity: 0.4;
+  filter: grayscale(0.7);
+}
+
+.tool-btn .tool-icon {
+  font-size: 22px;
+  line-height: 1;
+}
+
+#tool-freeze .tool-icon {
+  color: #a0dcff;
+}
+
+#tool-cutter .tool-icon {
+  color: var(--gold);
+}
+
+.tool-btn .tool-count {
+  position: absolute;
+  top: -4px;
+  right: -4px;
+  min-width: 20px;
+  height: 20px;
+  border-radius: 999px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--accent);
+  color: var(--ink);
+  font-size: 11px;
+  font-weight: 900;
+  padding: 0 5px;
+  box-shadow: 0 2px 0 rgba(0, 0, 0, 0.3);
+}
+
+/* Freeze countdown ring (SVG stroke driven by JS) */
+.tool-ring {
+  position: absolute;
+  inset: -2px;
+  width: calc(100% + 4px);
+  height: calc(100% + 4px);
+  transform: rotate(-90deg);
+  pointer-events: none;
+}
+
+.tool-ring circle {
+  fill: none;
+  stroke: #a0dcff;
+  stroke-width: 3;
+  stroke-linecap: round;
+  stroke-dasharray: 126;
+  stroke-dashoffset: 126;
+}
+
+/* Active freeze: spin a subtle shimmer on the button */
+.tool-btn.active {
+  border-color: #a0dcff;
+  box-shadow:
+    0 4px 0 rgba(0, 0, 0, 0.35),
+    0 0 14px rgba(160, 220, 255, 0.6);
+}
+
+/* Cut mode: highlight cutter + change canvas cursor */
+.tool-btn.armed {
+  border-color: var(--gold);
+  box-shadow:
+    0 4px 0 rgba(0, 0, 0, 0.35),
+    0 0 14px rgba(255, 201, 60, 0.6);
+  animation: armed-pulse 0.9s ease-in-out infinite;
+}
+
+@keyframes armed-pulse {
+  0%,
+  100% {
+    transform: scale(1);
+  }
+  50% {
+    transform: scale(1.07);
+  }
+}
+
+#screen-play.cut-mode #game-canvas {
+  cursor: crosshair;
+}
+
+.cut-hint {
+  position: absolute;
+  bottom: 80px;
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 8px 16px;
+  border-radius: 999px;
+  background: rgba(255, 201, 60, 0.14);
+  border: 1px solid rgba(255, 201, 60, 0.45);
+  color: var(--gold);
+  font-size: 12px;
+  font-weight: 800;
+  z-index: 5;
+  animation: screen-in 0.3s ease both;
+  pointer-events: none;
+}
+
+/* ---------------------------------- */
+/* Game over overlay                  */
+/* ---------------------------------- */
+
+.overlay.danger {
+  background: rgba(40, 4, 10, 0.72);
+}
+
+.result-card.gameover h2 {
+  background: linear-gradient(180deg, #ffffff, var(--danger));
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
+.gameover-plug {
+  font-size: 54px;
+  margin: 18px 0 6px;
+  animation: plug-swing 1.6s ease-in-out infinite;
+}
+
+@keyframes plug-swing {
+  0%,
+  100% {
+    transform: rotate(-8deg);
+  }
+  50% {
+    transform: rotate(8deg);
+  }
+}
+
+/* ---------------------------------- */
+/* Achievement toast                  */
+/* ---------------------------------- */
+
+.achievement-toast {
+  position: absolute;
+  top: 64px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 20px;
+  border-radius: 14px;
+  background: linear-gradient(135deg, #4a3708, #8a6a14);
+  border: 1px solid var(--gold);
+  box-shadow:
+    var(--shadow),
+    0 0 24px rgba(255, 201, 60, 0.35);
+  z-index: 9;
+  animation: toast-drop 0.5s cubic-bezier(0.34, 1.45, 0.64, 1) both;
+}
+
+@keyframes toast-drop {
+  from {
+    opacity: 0;
+    transform: translateX(-50%) translateY(-30px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(-50%) translateY(0);
+  }
+}
+
+.achievement-toast.leaving {
+  animation: toast-leave 0.4s ease both;
+}
+
+@keyframes toast-leave {
+  to {
+    opacity: 0;
+    transform: translateX(-50%) translateY(-30px);
+  }
+}
+
+.achievement-toast .ach-badge {
+  font-size: 26px;
+}
+
+.achievement-toast .ach-text {
+  display: flex;
+  flex-direction: column;
+}
+
+.achievement-toast strong {
+  font-size: 14px;
+  font-weight: 900;
+  color: #fff;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.achievement-toast span:not(.ach-badge) {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--gold);
+}
+
+/* ---------------------------------- */
+/* Tutorial callout card              */
+/* ---------------------------------- */
+
+.tutorial-card {
+  width: min(360px, calc(100vw - 48px));
+  padding: 26px 24px;
+  border-radius: var(--radius);
+  background: var(--panel);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  box-shadow: var(--shadow);
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  animation: card-in 0.45s cubic-bezier(0.34, 1.45, 0.64, 1) both;
+}
+
+.tutorial-icon {
+  font-size: 44px;
+  line-height: 1;
+}
+
+.tutorial-card h2 {
+  font-size: 19px;
+  font-weight: 900;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: var(--gold);
+}
+
+.tutorial-card p {
+  font-size: 13.5px;
+  line-height: 1.55;
+  color: var(--muted);
+}
+
+.tutorial-card .btn {
+  margin-top: 6px;
+  width: 100%;
+}
+
+/* Time-bonus chip variant */
+.tie-earn.bonus {
+  background: rgba(255, 201, 60, 0.12);
+  border-color: rgba(255, 201, 60, 0.35);
+  color: var(--gold);
+  animation-delay: 1.6s;
+}
+
+/* Wallet pill for tools */
+.wallet.tool {
+  background: rgba(160, 220, 255, 0.1);
+  border-color: rgba(160, 220, 255, 0.25);
+}
+
+/* Mechanic chips in world headers */
+.mech-chips {
+  display: inline-flex;
+  gap: 4px;
+  margin-left: 8px;
+  font-size: 12px;
+  vertical-align: middle;
+}
+
+.mech-chip {
+  width: 22px;
+  height: 22px;
+  border-radius: 7px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+}
+
+/* Node corner icon for mechanic levels */
+.level-node .mech-dot {
+  position: absolute;
+  top: -3px;
+  right: -3px;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 10px;
+  background: var(--panel);
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  z-index: 2;
+}
+
 /* Accessibility: respect reduced-motion preference. */
 @media (prefers-reduced-motion: reduce) {
   *,

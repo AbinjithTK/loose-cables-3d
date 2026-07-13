@@ -1,7 +1,11 @@
+import type { ToolWallet } from './achievements';
+
 /** Per-level progress record. */
 export type LevelProgress = {
   stars: number;
   bestMoves: number;
+  /** Best completion time in seconds (lower is better). */
+  bestTimeSec?: number;
 };
 
 /** The full player profile persisted server-side. */
@@ -14,6 +18,10 @@ export type PlayerProfile = {
   /** ISO date of last daily completion + current streak length. */
   lastDaily: string | null;
   streak: number;
+  /** Consumable tool charges (earned via achievements). */
+  tools: ToolWallet;
+  /** Unlocked achievement ids. */
+  achievements: string[];
 };
 
 export type InitResponse = {
@@ -28,12 +36,22 @@ export type InitResponse = {
 export type LevelCompleteRequest = {
   levelId: string;
   moves: number;
+  /** Completion time in seconds. */
+  timeSec: number;
+  /** Longest cascade chain index reached (0 = none). */
+  maxChain: number;
+  /** True if no tools were used. */
+  noTools: boolean;
 };
 
 export type LevelCompleteResponse = {
   type: 'level-complete';
   stars: number;
   zipTiesEarned: number;
+  /** Includes the time bonus, already added into zipTiesEarned. */
+  timeBonus: number;
+  /** Newly unlocked achievement ids (rewards already applied to profile). */
+  unlocked: string[];
   profile: PlayerProfile;
 };
 
@@ -55,6 +73,15 @@ export type DailyScoreResponse = {
   top: DailyEntry[];
   zipTiesEarned: number;
   streak: number;
+  profile: PlayerProfile;
+};
+
+export type ToolSpendRequest = {
+  tool: 'freeze' | 'cutter';
+};
+
+export type ToolSpendResponse = {
+  type: 'tool-spend';
   profile: PlayerProfile;
 };
 

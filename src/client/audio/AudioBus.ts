@@ -22,13 +22,22 @@ export type SfxId =
   | 'sfx_world_unlock'   // search: "heavy switch breaker room lights on"
   | 'sfx_ziptie_earn'    // search: "coin tick plastic"
   | 'sfx_streak_flame'   // search: "whoosh flame ignite small"
-  | 'sfx_door_open';     // search: "cabinet door creak open short"
+  | 'sfx_door_open'      // search: "cabinet door creak open short"
+  | 'sfx_timer_tick'     // search: "clock tick single dry short"
+  | 'sfx_time_up'        // search: "power down breaker trip thud"
+  | 'sfx_freeze'         // search: "ice crackle magic freeze spell short"
+  | 'sfx_cut'            // search: "wire snip scissors cut spark"
+  | 'sfx_zap'            // search: "electric shock buzz zap short"
+  | 'sfx_golden_fail'    // search: "descending womp sad trombone synth short"
+  | 'sfx_surge_warning'  // search: "alarm klaxon short warning"
+  | 'sfx_achievement';   // search: "triumphant short fanfare achievement unlock"
 
 const ALL_SFX: SfxId[] = [
   'sfx_plug_grab', 'sfx_plug_snap', 'sfx_plug_deny', 'sfx_cable_resolve',
   'sfx_resolve_pop', 'sfx_cascade', 'sfx_ui_tap', 'sfx_star_award',
   'sfx_level_win', 'sfx_world_unlock', 'sfx_ziptie_earn', 'sfx_streak_flame',
-  'sfx_door_open',
+  'sfx_door_open', 'sfx_timer_tick', 'sfx_time_up', 'sfx_freeze', 'sfx_cut',
+  'sfx_zap', 'sfx_golden_fail', 'sfx_surge_warning', 'sfx_achievement',
 ];
 
 export class AudioBus {
@@ -202,6 +211,45 @@ export class AudioBus {
       case 'sfx_door_open':
         tone(180, 0.5, 'sawtooth', 0.07, 0, 120);
         noise(0.4, 0.1, 0.02, 1500);
+        break;
+      case 'sfx_timer_tick':
+        tone(1200, 0.03, 'square', 0.14);
+        break;
+      case 'sfx_time_up':
+        tone(220, 0.6, 'sawtooth', 0.3, 0, 55);
+        tone(110, 0.7, 'triangle', 0.3, 0.1, 40);
+        noise(0.5, 0.18, 0.05, 800);
+        break;
+      case 'sfx_freeze':
+        tone(2093, 0.3, 'sine', 0.18, 0, 3136);
+        tone(2637, 0.35, 'sine', 0.12, 0.08, 3520);
+        noise(0.3, 0.08, 0, 8000);
+        break;
+      case 'sfx_cut':
+        tone(2800, 0.03, 'square', 0.2);
+        noise(0.06, 0.22, 0.01, 7000);
+        tone(400, 0.1, 'triangle', 0.15, 0.04, 200);
+        break;
+      case 'sfx_zap':
+        noise(0.14, 0.3, 0, 6000);
+        tone(80, 0.14, 'sawtooth', 0.35, 0, 400);
+        tone(1600, 0.08, 'square', 0.12, 0.02, 300);
+        break;
+      case 'sfx_golden_fail':
+        tone(392, 0.22, 'sawtooth', 0.2, 0, 330);
+        tone(330, 0.25, 'sawtooth', 0.2, 0.2, 262);
+        tone(262, 0.4, 'sawtooth', 0.22, 0.42, 196);
+        break;
+      case 'sfx_surge_warning':
+        tone(880, 0.18, 'square', 0.2);
+        tone(880, 0.18, 'square', 0.2, 0.28);
+        break;
+      case 'sfx_achievement':
+        tone(784, 0.12, 'triangle', 0.3);
+        tone(988, 0.12, 'triangle', 0.3, 0.1);
+        tone(1175, 0.12, 'triangle', 0.3, 0.2);
+        tone(1568, 0.4, 'triangle', 0.34, 0.3);
+        tone(2093, 0.35, 'sine', 0.15, 0.34);
         break;
     }
   }

@@ -32,6 +32,8 @@
           <div style="display: flex; align-items: center; gap: 8px">
             <div class="wallet" id="wallet-stars" title="Total stars">&#9733; <span id="total-stars">0</span></div>
             <div class="wallet" id="wallet-ties" title="Zip Ties">&#128279; <span id="total-ties">0</span></div>
+            <div class="wallet tool" id="wallet-freeze" title="Time Freezes (earned via achievements)">&#10052; <span id="total-freeze">0</span></div>
+            <div class="wallet tool" id="wallet-cutter" title="Wire Cutters (earned via achievements)">&#9986; <span id="total-cutter">0</span></div>
             <button id="mute-btn" class="icon-btn" type="button" aria-label="Toggle sound">&#9835;</button>
           </div>
         </header>
@@ -61,16 +63,58 @@
             <span class="label">Par</span>
             <span class="value" id="hud-par">0</span>
           </div>
+          <div class="hud-pill hud-timer" id="hud-timer" aria-label="Time remaining">
+            <span class="timer-icon">&#9201;</span>
+            <span class="value" id="hud-time">0:00</span>
+          </div>
           <div class="hud-pill hud-stars" id="hud-stars" aria-label="Projected stars">
             &#9733;&#9733;&#9733;
           </div>
           <button id="restart-btn" class="icon-btn" type="button" aria-label="Restart level">&#8635;</button>
         </div>
 
+        <!-- Tools: Time Freeze + Wire Cutter -->
+        <div class="toolbar" id="toolbar">
+          <button id="tool-freeze" class="tool-btn" type="button" aria-label="Time Freeze: stop the clock for 15 seconds">
+            <svg class="tool-ring" viewBox="0 0 44 44" aria-hidden="true"><circle cx="22" cy="22" r="20" /></svg>
+            <span class="tool-icon">&#10052;</span>
+            <span class="tool-count" id="tool-freeze-n">0</span>
+          </button>
+          <button id="tool-cutter" class="tool-btn" type="button" aria-label="Wire Cutter: cut one cable of your choice">
+            <span class="tool-icon">&#9986;</span>
+            <span class="tool-count" id="tool-cutter-n">0</span>
+          </button>
+        </div>
+
         <div class="level-toast" id="level-toast" hidden>
           <h2 id="toast-name"></h2>
           <p id="toast-sub"></p>
         </div>
+
+        <!-- Mechanic tutorial callout (first encounter only) -->
+        <div class="overlay" id="tutorial-overlay" hidden>
+          <div class="tutorial-card">
+            <div class="tutorial-icon" id="tutorial-icon"></div>
+            <h2 id="tutorial-title"></h2>
+            <p id="tutorial-body"></p>
+            <button id="tutorial-ok-btn" class="btn" type="button">Got it</button>
+          </div>
+        </div>
+
+        <!-- Achievement toast -->
+        <div class="achievement-toast" id="achievement-toast" hidden>
+          <span class="ach-badge">&#127942;</span>
+          <div class="ach-text">
+            <strong id="ach-name"></strong>
+            <span id="ach-reward"></span>
+          </div>
+        </div>
+
+        <!-- Cut-mode hint -->
+        <div class="cut-hint" id="cut-hint" hidden>Tap a cable to cut it &mdash; tap the tool again to cancel</div>
+
+        <!-- Live-wire zap flash -->
+        <div class="zap-flash" id="zap-flash" aria-hidden="true"></div>
 
         <!-- Win panel -->
         <div class="overlay" id="win-overlay" hidden>
@@ -85,11 +129,26 @@
             <div class="result-stats">
               <div class="stat"><span class="num" id="win-moves">0</span><span class="cap">Moves</span></div>
               <div class="stat"><span class="num" id="win-par">0</span><span class="cap">Par</span></div>
+              <div class="stat"><span class="num" id="win-time">0:00</span><span class="cap">Time</span></div>
             </div>
             <div class="tie-earn" id="win-ties" hidden>&#128279; +<span id="win-ties-n">0</span> Zip Ties</div>
+            <div class="tie-earn bonus" id="win-bonus" hidden>&#9889; Time bonus +1</div>
             <div class="result-actions">
               <button id="win-retry-btn" class="btn ghost" type="button">Improve</button>
               <button id="win-next-btn" class="btn" type="button">Next</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Game over (time out) -->
+        <div class="overlay danger" id="gameover-overlay" hidden>
+          <div class="result-card gameover">
+            <h2>Out of Power</h2>
+            <p class="subtitle" id="gameover-flavor">The breaker tripped. The tangle wins this round.</p>
+            <div class="gameover-plug" aria-hidden="true">&#128268;</div>
+            <div class="result-actions">
+              <button id="gameover-map-btn" class="btn ghost" type="button">Map</button>
+              <button id="gameover-retry-btn" class="btn" type="button">Retry</button>
             </div>
           </div>
         </div>

@@ -167,6 +167,18 @@ export const WORLDS: WorldTheme[] = [
 // Level specs — the sawtooth difficulty curve
 // ---------------------------------------------------------------------------
 
+/** Per-level world mechanics (each world introduces one, kept in later worlds). */
+export type LevelMechanics = {
+  /** W3+: one golden cable must be cleared last. */
+  golden?: boolean;
+  /** W4+: one live wire zaps you if grabbed while still crossing others. */
+  liveWire?: boolean;
+  /** W5+: blackout board with a pointer flashlight. */
+  blackout?: boolean;
+  /** W6: mid-level power surge swaps one cable's ends. */
+  surge?: boolean;
+};
+
 export type CampaignLevel = {
   /** Global level id, e.g. "w2-7". */
   id: string;
@@ -177,6 +189,9 @@ export type CampaignLevel = {
   isBoss: boolean;
   seed: number;
   spec: CustomSpec;
+  /** Countdown limit in seconds; timeout = game over. */
+  timeLimit: number;
+  mechanics: LevelMechanics;
 };
 
 export const LEVELS_PER_WORLD = 11;
@@ -246,19 +261,66 @@ function levelSpec(world: number, index: number): CustomSpec {
   };
 }
 
+/** Base countdown seconds per world (before spec scaling). */
+const WORLD_TIME_BASE = [55, 60, 65, 70, 75, 80];
+
+/**
+ * Countdown limit: base + 6s per cable + 4s per crossing; bosses +45s.
+ * Tuned for ~2x slack in early worlds, tightening toward ~1.3x by W6.
+ */
+function levelTimeLimit(world: number, spec: CustomSpec, isBoss: boolean): number {
+  const base = WORLD_TIME_BASE[world - 1] ?? 80;
+  const t = base + spec.cableCount * 6 + spec.minCrossings * 4 + (isBoss ? 45 : 0);
+  return Math.round(t / 5) * 5; // clean 5s steps
+}
+
+/**
+ * Deterministic mechanics assignment. Each world introduces one mechanic
+ * (from level 3 onward, so worlds open with familiar boards), and carries
+ * earlier mechanics forward at reduced density.
+ */
+function levelMechanics(world: number, index: number, seed: number): LevelMechanics {
+  const m: LevelMechanics = {};
+  const isBoss = index === LEVELS_PER_WORLD;
+  // Cheap deterministic hash roll in [0,1) per (mechanic, level).
+  const roll = (salt: string): number => ((seed ^ hashStringToSeed(salt)) >>> 8) / 0x1000000;
+
+  // W3+: golden cable — always on W3 L3+, ~30% carry-over later.
+  if (world === 3 && index >= 3) m.golden = true;
+  else if (world > 3 && !isBoss && roll('golden') < 0.3) m.golden = true;
+
+  // W4+: live wire — always on W4 L3+, ~40% carry-over later.
+  if (world === 4 && index >= 3) m.liveWire = true;
+  else if (world > 4 && !isBoss && roll('livewire') < 0.4) m.liveWire = true;
+
+  // W5+: blackout — always on W5 L3+, ~40% carry-over in W6.
+  if (world === 5 && index >= 3) m.blackout = true;
+  else if (world > 5 && !isBoss && roll('blackout') < 0.4) m.blackout = true;
+
+  // W6: power surge on every level (bosses get 2 surges, handled client-side).
+  if (world === 6) m.surge = true;
+
+  return m;
+}
+
 /** Builds the full 66-level campaign table (cheap; pure data). */
 export function buildCampaign(): CampaignLevel[] {
   const levels: CampaignLevel[] = [];
   for (let w = 1; w <= WORLDS.length; w++) {
     for (let i = 1; i <= LEVELS_PER_WORLD; i++) {
+      const seed = hashStringToSeed(`cable-tower:v1:w${w}:l${i}`);
+      const spec = levelSpec(w, i);
+      const isBoss = i === LEVELS_PER_WORLD;
       levels.push({
         id: `w${w}-${i}`,
         world: w,
         index: i,
         name: LEVEL_NAMES[w - 1]![i - 1]!,
-        isBoss: i === LEVELS_PER_WORLD,
-        seed: hashStringToSeed(`cable-tower:v1:w${w}:l${i}`),
-        spec: levelSpec(w, i),
+        isBoss,
+        seed,
+        spec,
+        timeLimit: levelTimeLimit(w, spec, isBoss),
+        mechanics: levelMechanics(w, i, seed),
       });
     }
   }
@@ -274,7 +336,35 @@ export function getLevel(id: string): CampaignLevel | undefined {
 /** Deterministically generates the puzzle for a campaign level. */
 export function generateCampaignLevel(level: CampaignLevel): PuzzleDefinition {
   const world = WORLDS[level.world - 1]!;
-  return generateFromSpec(level.spec, level.seed, level.name, world.scene, world.difficulty);
+  const def = generateFromSpec(level.spec, level.seed, level.name, world.scene, world.difficulty);
+  applyMechanics(def, level.mechanics, level.seed);
+  return def;
+}
+
+/**
+ * Marks mechanic cables on a generated puzzle, deterministically by seed.
+ * Golden and live-wire picks avoid locked cables so both remain fully movable,
+ * and avoid each other.
+ */
+export function applyMechanics(
+  def: PuzzleDefinition,
+  mechanics: LevelMechanics,
+  seed: number
+): void {
+  const movable = def.cables.filter((c) => !c.lockA && !c.lockB);
+  if (mechanics.golden && movable.length >= 2) {
+    const pick = movable[seed % movable.length]!;
+    def.goldenCableId = pick.id;
+  }
+  if (mechanics.liveWire) {
+    const candidates = movable.filter((c) => c.id !== def.goldenCableId);
+    if (candidates.length >= 1) {
+      const pick = candidates[(seed >>> 4) % candidates.length]!;
+      def.liveWireCableId = pick.id;
+    }
+  }
+  if (mechanics.blackout) def.blackout = true;
+  if (mechanics.surge) def.surge = true;
 }
 
 // ---------------------------------------------------------------------------
@@ -293,6 +383,11 @@ export function zipTiesForClear(stars: number, firstClear: boolean): number {
   let earned = firstClear ? 2 : 0;
   if (stars === 3) earned += 1;
   return earned;
+}
+
+/** Time bonus: finish with more than half the clock left = +1 Zip Tie. */
+export function timeBonusTies(timeLeftSec: number, timeLimit: number): number {
+  return timeLimit > 0 && timeLeftSec / timeLimit > 0.5 ? 1 : 0;
 }
 
 export const MAX_STARS = CAMPAIGN.length * 3;
