@@ -1,0 +1,175 @@
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+html,
+body {
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background: #0d0d14;
+  font-family: 'Segoe UI', system-ui, Arial, sans-serif;
+  color: #e6e9f0;
+  -webkit-font-smoothing: antialiased;
+}
+
+#bg {
+  position: fixed;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+  touch-action: none;
+}
+
+#hud {
+  position: fixed;
+  top: 14px;
+  left: 0;
+  right: 0;
+  text-align: center;
+  color: #c8ccd6;
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: 0.2px;
+  text-shadow: 0 2px 6px rgba(0, 0, 0, 0.6);
+  pointer-events: none;
+}
+
+/* Top-right New button */
+#newBtn {
+  position: fixed;
+  top: 12px;
+  right: 12px;
+  padding: 8px 16px;
+  border: none;
+  border-radius: 10px;
+  background: rgba(40, 44, 58, 0.85);
+  color: #e6e9f0;
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.4px;
+  cursor: pointer;
+  backdrop-filter: blur(6px);
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.35);
+  transition: background 0.15s ease, transform 0.1s ease;
+}
+#newBtn:hover {
+  background: rgba(60, 66, 84, 0.95);
+}
+#newBtn:active {
+  transform: scale(0.95);
+}
+#newBtn.hidden {
+  display: none;
+}
+
+/* Difficulty menu overlay */
+#menu {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 18px;
+  padding: 24px;
+  text-align: center;
+  background: radial-gradient(ellipse at center, rgba(20, 22, 34, 0.72), rgba(8, 9, 16, 0.94));
+  backdrop-filter: blur(3px);
+  z-index: 10;
+}
+#menu.hidden {
+  display: none;
+}
+#menu h1 {
+  font-size: 40px;
+  font-weight: 900;
+  letter-spacing: 3px;
+  background: linear-gradient(90deg, #ff8a3d, #b06bff, #12d8fa);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  text-shadow: 0 6px 24px rgba(0, 0, 0, 0.5);
+}
+#menu p {
+  max-width: 340px;
+  font-size: 14px;
+  line-height: 1.5;
+  color: #a8aec0;
+}
+#difficulties {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  width: min(280px, 80vw);
+}
+#difficulties button {
+  padding: 14px 20px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 12px;
+  background: rgba(38, 42, 56, 0.9);
+  color: #e6e9f0;
+  font-size: 16px;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  cursor: pointer;
+  transition: background 0.15s ease, transform 0.1s ease, border-color 0.15s ease;
+}
+#difficulties button:hover {
+  background: rgba(56, 62, 82, 0.95);
+  border-color: rgba(255, 255, 255, 0.18);
+}
+#difficulties button:active {
+  transform: scale(0.97);
+}
+
+/* Win overlay */
+#win {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  background: radial-gradient(ellipse at center, rgba(18, 30, 22, 0.55), rgba(8, 12, 10, 0.85));
+  transition: opacity 0.4s ease;
+  z-index: 11;
+}
+#win.hidden {
+  opacity: 0;
+  pointer-events: none;
+}
+#winTitle {
+  color: #33e07a;
+  font-size: 52px;
+  font-weight: 900;
+  letter-spacing: 2px;
+  text-shadow: 0 4px 18px rgba(51, 224, 122, 0.4);
+}
+#winStats {
+  font-size: 16px;
+  color: #c8ccd6;
+}
+#nextBtn {
+  margin-top: 8px;
+  padding: 14px 28px;
+  border: none;
+  border-radius: 12px;
+  background: #33e07a;
+  color: #06210f;
+  font-size: 16px;
+  font-weight: 800;
+  letter-spacing: 0.5px;
+  cursor: pointer;
+  transition: transform 0.1s ease, filter 0.15s ease;
+}
+#nextBtn:hover {
+  filter: brightness(1.08);
+}
+#nextBtn:active {
+  transform: scale(0.96);
+}
