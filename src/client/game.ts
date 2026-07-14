@@ -20,15 +20,18 @@ import {
 } from '../shared/levels/campaign';
 import { generatePuzzle } from '../shared/engine/LevelGenerator';
 import { hashStringToSeed } from '../shared/engine/rng';
-import type { PuzzleDefinition } from '../shared/types';
+import type { Difficulty, PuzzleDefinition, SceneType } from '../shared/types';
+import { navigateTo } from '@devvit/web/client';
 import type {
   DailyScoreResponse,
   InitResponse,
   LevelCompleteResponse,
   PlayerProfile,
+  PublishLevelResponse,
   RosterEntry,
   RosterResponse,
   ToolSpendResponse,
+  UgcLevel,
 } from '../shared/api';
 import {
   ACHIEVEMENTS,
@@ -81,6 +84,18 @@ const achEarnedN = $<HTMLSpanElement>('ach-earned-n');
 const achTotalN = $<HTMLSpanElement>('ach-total-n');
 const achBackBtn = $<HTMLButtonElement>('ach-back-btn');
 const homeAchBtn = $<HTMLButtonElement>('home-ach-btn');
+
+// Level Maker
+const screenCreate = $<HTMLDivElement>('screen-create');
+const homeCreateBtn = $<HTMLButtonElement>('home-create-btn');
+const createBackBtn = $<HTMLButtonElement>('create-back-btn');
+const createDiff = $<HTMLDivElement>('create-diff');
+const createSummary = $<HTMLDivElement>('create-summary');
+const createRollBtn = $<HTMLButtonElement>('create-roll-btn');
+const createTestBtn = $<HTMLButtonElement>('create-test-btn');
+const createTitle = $<HTMLInputElement>('create-title');
+const createPublishBtn = $<HTMLButtonElement>('create-publish-btn');
+const createStatus = $<HTMLParagraphElement>('create-status');
 
 const backBtn = $<HTMLButtonElement>('back-btn');
 const restartBtn = $<HTMLButtonElement>('restart-btn');
@@ -135,7 +150,11 @@ const winNextBtn = $<HTMLButtonElement>('win-next-btn');
 // State
 // ---------------------------------------------------------------------------
 
-type Mode = { kind: 'campaign'; level: CampaignLevel } | { kind: 'daily'; dateIso: string };
+type Mode =
+  | { kind: 'campaign'; level: CampaignLevel }
+  | { kind: 'daily'; dateIso: string }
+  | { kind: 'maker' }
+  | { kind: 'ugc'; name: string; creator: string };
 
 let profile: PlayerProfile = {
   username: 'you',
@@ -155,6 +174,11 @@ let dailyDone = false;
 let rosterByLevel = new Map<string, RosterEntry[]>();
 // The current user's own snoovatar URL (null if they have none).
 let myAvatarUrl: string | null = null;
+
+// Level Maker + UGC state.
+let makerDef: PuzzleDefinition | null = null;
+let makerDifficulty: Difficulty = 'medium';
+let ugcLevel: UgcLevel | null = null;
 
 let game: CableGame | null = null;
 let mode: Mode | null = null;
@@ -190,7 +214,7 @@ const WIN_FLAVOR = [
 // ---------------------------------------------------------------------------
 
 function showScreen(el: HTMLDivElement): void {
-  for (const s of [screenLoading, screenHome, screenMap, screenAchievements, screenPlay]) {
+  for (const s of [screenLoading, screenHome, screenMap, screenAchievements, screenCreate, screenPlay]) {
     s.hidden = s !== el;
   }
   // Retrigger the enter transition on every swap.
@@ -213,6 +237,7 @@ async function serverInit(): Promise<void> {
     dailyDate = data.dailyDate;
     dailyDone = data.dailyDone;
     myAvatarUrl = data.avatarUrl ?? null;
+    ugcLevel = data.ugc ?? null;
     serverAvailable = true;
   } catch {
     serverAvailable = false;
@@ -566,6 +591,7 @@ function showHome(): void {
   winOverlay.hidden = true;
   gameoverOverlay.hidden = true;
   tutorialOverlay.hidden = true;
+  clearAchievementToasts();
   renderHome();
   showScreen(screenHome);
 }
@@ -583,6 +609,7 @@ function showMap(): void {
   winOverlay.hidden = true;
   gameoverOverlay.hidden = true;
   tutorialOverlay.hidden = true;
+  clearAchievementToasts();
   renderMap();
   void refreshRosterAndMap();
   showScreen(screenMap);
@@ -678,6 +705,7 @@ function launchPuzzle(
   disposeGame();
   winOverlay.hidden = true;
   gameoverOverlay.hidden = true;
+  clearAchievementToasts();
   disarmCut();
   maxChainReached = 0;
   noToolsUsed = true;
@@ -754,6 +782,113 @@ function startDaily(): void {
     DEFAULT_THEME,
     "Today's Tangle",
     `${dailyDate} \u2022 Par ${puzzle.optimalMoves} \u2022 One attempt counts`,
+    null
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Level Maker + user-generated levels
+// ---------------------------------------------------------------------------
+
+const MAKER_SCENES: Record<Difficulty, SceneType> = {
+  easy: 'desk',
+  medium: 'strip',
+  hard: 'gaming',
+  extreme: 'rack',
+  nightmare: 'rack',
+};
+
+function themeForDifficulty(d: Difficulty): GameTheme {
+  const idx: Record<Difficulty, number> = { easy: 0, medium: 2, hard: 3, extreme: 4, nightmare: 5 };
+  return WORLDS[idx[d]] ?? DEFAULT_THEME;
+}
+
+/** Rolls a fresh, guaranteed-solvable tangle for the current maker difficulty. */
+function rollMaker(): void {
+  const seed = Math.floor(Math.random() * 1_000_000_000);
+  makerDef = generatePuzzle({
+    difficulty: makerDifficulty,
+    seed,
+    name: createTitle.value.trim() || 'Custom Tangle',
+    scene: MAKER_SCENES[makerDifficulty],
+  });
+  createSummary.textContent =
+    `${makerDef.gridWidth}\u00d7${makerDef.gridHeight} grid \u2022 ` +
+    `${makerDef.cables.length} cables \u2022 par ${makerDef.optimalMoves}`;
+  createStatus.textContent = '';
+}
+
+function testMaker(): void {
+  if (!makerDef) rollMaker();
+  if (!makerDef) return;
+  mode = { kind: 'maker' };
+  launchPuzzle(
+    makerDef,
+    themeForDifficulty(makerDifficulty),
+    'Test Your Tangle',
+    'Solve it to make sure it works',
+    null
+  );
+}
+
+async function publishMaker(): Promise<void> {
+  if (!makerDef) {
+    createStatus.textContent = 'Roll a tangle first!';
+    return;
+  }
+  if (!serverAvailable) {
+    createStatus.textContent = 'Publishing only works in the live app on Reddit.';
+    return;
+  }
+  const title = createTitle.value.trim() || 'Custom Tangle';
+  createPublishBtn.disabled = true;
+  createStatus.textContent = 'Publishing\u2026';
+  try {
+    const res = await fetch('/api/publish-level', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ title, def: makerDef }),
+    });
+    const data = res.ok ? ((await res.json()) as PublishLevelResponse) : null;
+    if (data && data.type === 'publish') {
+      createStatus.textContent = 'Published! Opening your post\u2026';
+      audio.play('sfx_world_unlock');
+      setTimeout(() => navigateTo(data.url), 900);
+    } else {
+      createStatus.textContent = 'Could not publish. Try again.';
+    }
+  } catch {
+    createStatus.textContent = 'Could not publish. Try again.';
+  } finally {
+    createPublishBtn.disabled = false;
+  }
+}
+
+function showCreate(): void {
+  stopLevelTimer();
+  disarmCut();
+  disposeGame();
+  winOverlay.hidden = true;
+  gameoverOverlay.hidden = true;
+  tutorialOverlay.hidden = true;
+  clearAchievementToasts();
+  createStatus.textContent = '';
+  if (!makerDef) rollMaker();
+  showScreen(screenCreate);
+}
+
+/** Boots directly into a shared user-generated level (UGC post). */
+function startUgc(): void {
+  if (!ugcLevel) {
+    showHome();
+    return;
+  }
+  mode = { kind: 'ugc', name: ugcLevel.name, creator: ugcLevel.creator };
+  launchPuzzle(
+    ugcLevel.def,
+    DEFAULT_THEME,
+    ugcLevel.name,
+    `A tangle by u/${ugcLevel.creator}`,
     null
   );
 }
@@ -1059,6 +1194,14 @@ function showAchievements(ids: string[]): void {
   if (!achievementShowing) showNextAchievement();
 }
 
+/** Dismiss any visible achievement toast and empty the queue (level/screen change). */
+function clearAchievementToasts(): void {
+  achievementQueue.length = 0;
+  achievementShowing = false;
+  achievementToast.classList.remove('leaving');
+  achievementToast.hidden = true;
+}
+
 function showNextAchievement(): void {
   const id = achievementQueue.shift();
   if (!id) {
@@ -1139,7 +1282,7 @@ async function handleWin(moves: number): Promise<void> {
       subtitle = 'The tower rumbles. A new floor unlocks above\u2026';
       audio.play('sfx_world_unlock');
     }
-  } else {
+  } else if (mode.kind === 'daily') {
     const server = await serverDailyScore(moves, timeMs);
     dailyDone = true;
     if (server) {
@@ -1165,6 +1308,18 @@ async function handleWin(moves: number): Promise<void> {
     }
     winTitle.textContent = 'Tangle Untangled!';
     nextLabel = 'Tower';
+  } else {
+    // Level Maker test, or a shared UGC level: celebrate, no scoring.
+    ties = 0;
+    if (mode.kind === 'ugc') {
+      winTitle.textContent = 'Solved!';
+      subtitle = `You untangled u/${mode.creator}'s "${mode.name}"`;
+      nextLabel = 'Home';
+    } else {
+      winTitle.textContent = 'Nice Tangle!';
+      subtitle = 'It works! Publish it for the community?';
+      nextLabel = 'Publish';
+    }
   }
 
   // Populate panel.
@@ -1194,6 +1349,14 @@ async function handleWin(moves: number): Promise<void> {
 
 function nextAfterWin(): void {
   audio.play('sfx_ui_tap');
+  if (mode?.kind === 'maker') {
+    showCreate();
+    return;
+  }
+  if (mode?.kind === 'ugc') {
+    showHome();
+    return;
+  }
   if (mode?.kind === 'campaign') {
     const level = mode.level;
     const next = getLevel(`w${level.world}-${level.index + 1}`) ?? getLevel(`w${level.world + 1}-1`);
@@ -1218,15 +1381,21 @@ backBtn.addEventListener('click', () => {
   showMap();
 });
 
-restartBtn.addEventListener('click', () => {
-  audio.play('sfx_ui_tap');
+function restartCurrent(): void {
   if (mode?.kind === 'campaign') startCampaignLevel(mode.level);
   else if (mode?.kind === 'daily') startDaily();
+  else if (mode?.kind === 'maker') testMaker();
+  else if (mode?.kind === 'ugc') startUgc();
+}
+
+restartBtn.addEventListener('click', () => {
+  audio.play('sfx_ui_tap');
+  restartCurrent();
 });
 
 winRetryBtn.addEventListener('click', () => {
   audio.play('sfx_ui_tap');
-  if (mode?.kind === 'campaign') startCampaignLevel(mode.level);
+  if (mode?.kind === 'campaign' || mode?.kind === 'maker' || mode?.kind === 'ugc') restartCurrent();
   else showMap();
 });
 
@@ -1298,6 +1467,40 @@ homeAchBtn.addEventListener('click', () => {
   openAchievements(screenHome);
 });
 
+homeCreateBtn.addEventListener('click', () => {
+  audio.play('sfx_ui_tap');
+  showCreate();
+});
+
+createBackBtn.addEventListener('click', () => {
+  audio.play('sfx_ui_tap');
+  showHome();
+});
+
+createRollBtn.addEventListener('click', () => {
+  audio.play('sfx_ui_tap');
+  rollMaker();
+});
+
+createTestBtn.addEventListener('click', () => {
+  audio.play('sfx_ui_tap');
+  testMaker();
+});
+
+createPublishBtn.addEventListener('click', () => {
+  audio.play('sfx_ui_tap');
+  void publishMaker();
+});
+
+createDiff.addEventListener('click', (e) => {
+  const btn = (e.target as HTMLElement).closest<HTMLButtonElement>('button[data-diff]');
+  if (!btn) return;
+  audio.play('sfx_ui_tap');
+  makerDifficulty = btn.dataset.diff as Difficulty;
+  for (const b of createDiff.querySelectorAll('button')) b.classList.toggle('on', b === btn);
+  rollMaker();
+});
+
 mapAchBtn.addEventListener('click', () => {
   audio.play('sfx_ui_tap');
   openAchievements(screenMap);
@@ -1316,6 +1519,11 @@ achBackBtn.addEventListener('click', () => {
 async function boot(): Promise<void> {
   showScreen(screenLoading);
   await serverInit();
+  // A user-generated post boots straight into its tangle; otherwise the menu.
+  if (ugcLevel) {
+    startUgc();
+    return;
+  }
   await fetchRoster();
   showHome();
 }

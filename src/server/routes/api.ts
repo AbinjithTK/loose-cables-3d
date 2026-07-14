@@ -10,10 +10,13 @@ import type {
   LevelCompleteResponse,
   LevelProgress,
   PlayerProfile,
+  PublishLevelRequest,
+  PublishLevelResponse,
   RosterEntry,
   RosterResponse,
   ToolSpendRequest,
   ToolSpendResponse,
+  UgcLevel,
 } from '../../shared/api';
 import {
   generateCampaignLevel,
@@ -82,6 +85,11 @@ const ROSTER_POS = 'roster:pos'; // hash: username -> JSON { levelId, totalStars
 const ROSTER_AVATAR = 'roster:avatar'; // hash: username -> snoovatar url ('' = none)
 const ROSTER_CAP = 200; // keep only the most-recent N players
 
+/** Maps a Reddit post id to the Redis key holding its user-generated level. */
+function ugcPostKey(postId: string): string {
+  return `ugc:post:${postId}`;
+}
+
 /**
  * The user's snoovatar URL, cached in Redis so we only ever hit the Reddit API
  * once per user (snoovatars rarely change). Empty string = "no avatar".
@@ -140,6 +148,19 @@ api.get('/init', async (c) => {
     await recordPresence(profile);
     const avatarUrl = await getAvatarUrl(username);
     const dailyDate = todayIso();
+
+    // If this post is a user-generated level, load it so the client boots into it.
+    let ugc: UgcLevel | null = null;
+    try {
+      const ugcKey = await redis.get(ugcPostKey(postId));
+      if (ugcKey) {
+        const raw = await redis.get(ugcKey);
+        if (raw) ugc = JSON.parse(raw) as UgcLevel;
+      }
+    } catch {
+      ugc = null;
+    }
+
     return c.json<InitResponse>({
       type: 'init',
       postId,
@@ -147,6 +168,7 @@ api.get('/init', async (c) => {
       dailyDate,
       dailyDone: profile.lastDaily === dailyDate,
       avatarUrl,
+      ugc,
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : 'init failed';
@@ -378,6 +400,52 @@ api.get('/roster', async (c) => {
     return c.json<RosterResponse>({ type: 'roster', players });
   } catch (error) {
     const message = error instanceof Error ? error.message : 'roster failed';
+    return c.json<ErrorResponse>({ status: 'error', message }, 400);
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Level Maker — publish a user-generated level as its own Reddit post
+// ---------------------------------------------------------------------------
+
+api.post('/publish-level', async (c) => {
+  try {
+    const body = (await c.req.json()) as PublishLevelRequest;
+    const def = body.def;
+    const title = (body.title ?? '').trim().slice(0, 60) || 'Custom Tangle';
+
+    // Basic structural validation (the generator already guarantees solvability).
+    if (
+      !def ||
+      !Array.isArray(def.cables) ||
+      def.cables.length < 1 ||
+      def.cables.length > 24 ||
+      !Array.isArray(def.ports) ||
+      def.ports.length < 4
+    ) {
+      return c.json<ErrorResponse>({ status: 'error', message: 'invalid level' }, 400);
+    }
+
+    const username = await currentUsername();
+    const level: UgcLevel = { name: title, creator: username, def };
+
+    const key = `ugclevel:${Date.now()}:${Math.random().toString(36).slice(2, 8)}`;
+    await redis.set(key, JSON.stringify(level));
+
+    const post = await reddit.submitCustomPost({
+      title: `\u{1F50C} ${title} \u2014 a Loose Cables tangle by u/${username}`,
+      entry: 'default',
+      postData: { kind: 'ugc', key },
+    });
+    await redis.set(ugcPostKey(post.id), key);
+
+    return c.json<PublishLevelResponse>({
+      type: 'publish',
+      url: `https://reddit.com/r/${context.subredditName}/comments/${post.id}`,
+      postId: post.id,
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'publish failed';
     return c.json<ErrorResponse>({ status: 'error', message }, 400);
   }
 });

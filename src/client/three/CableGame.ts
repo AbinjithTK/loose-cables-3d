@@ -63,6 +63,9 @@ type Peg = {
   world: THREE.Vector3;
   anchor: CANNON.Body;
   socket: THREE.Mesh;
+  /** Colored collar ring that fills the socket when a plug is seated in it. */
+  seat: THREE.Mesh;
+  seatMat: THREE.MeshStandardMaterial;
 };
 
 type CableEnd = {
@@ -172,12 +175,15 @@ export class CableGame {
   /** Lights kept as fields so blackout can dim them. */
   private ambient!: THREE.AmbientLight;
   private keyLight!: THREE.DirectionalLight;
+  private hemi!: THREE.HemisphereLight;
   private flashlight: THREE.SpotLight | null = null;
   private flashTarget: THREE.Object3D | null = null;
   /** Last pointer position projected onto the board (drives the flashlight). */
   private lastPlanePoint = new THREE.Vector3(0, PEG_TOP_Y, 0);
   /** Cables that pulse (golden). */
   private pulsers: Array<{ material: THREE.MeshStandardMaterial; base: number }> = [];
+  /** Seat-collar snap-in animations (scale pop when a plug seats). */
+  private seatPops: Array<{ mesh: THREE.Mesh; t: number }> = [];
 
   /** Win confetti particles. */
   private confetti: Array<{
@@ -198,7 +204,6 @@ export class CableGame {
   private bezelMat!: THREE.MeshStandardMaterial;
   private holeMat!: THREE.MeshStandardMaterial;
   private plugHousingMat!: THREE.MeshStandardMaterial;
-  private boltMat!: THREE.MeshStandardMaterial;
   private twistTex!: THREE.Texture;
   private canvas: HTMLCanvasElement;
 
@@ -378,10 +383,16 @@ export class CableGame {
   }
 
   private setupLights(): void {
-    this.ambient = new THREE.AmbientLight(0xffffff, 0.5);
+    this.ambient = new THREE.AmbientLight(0xffffff, 0.72);
     this.scene.add(this.ambient);
 
-    const key = new THREE.DirectionalLight(hexToNumber(this.theme.keyLight), 1.2);
+    // Hemisphere fill: soft sky/ground bounce so the board feels lit and lively
+    // instead of murky. Sky tint follows the world's key light color.
+    this.hemi = new THREE.HemisphereLight(hexToNumber(this.theme.keyLight), 0x2a2340, 0.7);
+    this.hemi.position.set(0, 20, 0);
+    this.scene.add(this.hemi);
+
+    const key = new THREE.DirectionalLight(hexToNumber(this.theme.keyLight), 1.45);
     this.keyLight = key;
     key.position.set(7, 20, 9);
     key.castShadow = true;
@@ -397,16 +408,16 @@ export class CableGame {
     this.scene.add(key);
 
     // Colored rim lights for a lively, saturated look (themed per world).
-    const rimA = new THREE.PointLight(hexToNumber(this.theme.rimLightA), 0.9, 50, 2);
-    rimA.position.set(-11, 8, 6);
+    const rimA = new THREE.PointLight(hexToNumber(this.theme.rimLightA), 1.25, 55, 2);
+    rimA.position.set(-11, 9, 6);
     this.scene.add(rimA);
 
-    const rimB = new THREE.PointLight(hexToNumber(this.theme.rimLightB), 0.9, 50, 2);
-    rimB.position.set(11, 8, -6);
+    const rimB = new THREE.PointLight(hexToNumber(this.theme.rimLightB), 1.25, 55, 2);
+    rimB.position.set(11, 9, -6);
     this.scene.add(rimB);
 
-    const gold = new THREE.PointLight(0xffd27a, 0.5, 45, 2);
-    gold.position.set(0, 10, 10);
+    const gold = new THREE.PointLight(0xffe0a0, 0.7, 50, 2);
+    gold.position.set(0, 11, 10);
     this.scene.add(gold);
   }
 
@@ -426,7 +437,14 @@ export class CableGame {
     const panelTex = this.buildPanelTexture();
     const panel = new THREE.Mesh(
       new THREE.BoxGeometry(w, 0.5, h),
-      new THREE.MeshStandardMaterial({ map: panelTex, color: 0xffffff, roughness: 0.88, metalness: 0.2 })
+      new THREE.MeshStandardMaterial({
+        map: panelTex,
+        color: 0xb9bccb,
+        roughness: 0.85,
+        metalness: 0.25,
+        emissive: hexToNumber(this.theme.accent),
+        emissiveIntensity: 0.05,
+      })
     );
     panel.position.y = -0.25;
     panel.receiveShadow = true;
@@ -618,14 +636,22 @@ export class CableGame {
   }
 
   private setupPegs(): void {
-    // Socket bezel (brushed metal ring) + recessed hole.
-    this.bezelMat = new THREE.MeshStandardMaterial({ color: 0x3b4152, roughness: 0.35, metalness: 0.85 });
-    this.pegMat = new THREE.MeshStandardMaterial({ color: 0x22262f, roughness: 0.6, metalness: 0.5 });
-    this.holeMat = new THREE.MeshStandardMaterial({ color: 0x04050a, roughness: 1 });
+    // Socket bezel (brushed metal ring, faintly lit) + recessed hole.
+    this.bezelMat = new THREE.MeshStandardMaterial({
+      color: 0x454b60,
+      roughness: 0.3,
+      metalness: 0.9,
+      emissive: hexToNumber(this.theme.accent),
+      emissiveIntensity: 0.12,
+    });
+    this.pegMat = new THREE.MeshStandardMaterial({ color: 0x2a2f3c, roughness: 0.55, metalness: 0.6 });
+    this.holeMat = new THREE.MeshStandardMaterial({ color: 0x0c1120, roughness: 0.9 });
 
     const bezelGeo = new THREE.CylinderGeometry(CABLE_RADIUS * 2.0, CABLE_RADIUS * 2.1, 0.12, 24);
     const rimGeo = new THREE.CylinderGeometry(CABLE_RADIUS * 1.6, CABLE_RADIUS * 1.85, 0.34, 24);
     const holeGeo = new THREE.CylinderGeometry(CABLE_RADIUS * 1.25, CABLE_RADIUS * 1.25, 0.4, 20);
+    // A colored collar that seats into the socket to sell the "plugged-in" look.
+    const seatGeo = new THREE.CylinderGeometry(CABLE_RADIUS * 1.35, CABLE_RADIUS * 1.15, 0.22, 22);
 
     for (const port of this.def.ports) {
       const world = this.portWorld(port.col, port.row);
@@ -644,6 +670,18 @@ export class CableGame {
       hole.position.set(world.x, 0.09, world.z);
       this.scene.add(hole);
 
+      const seatMat = new THREE.MeshStandardMaterial({
+        color: 0x888888,
+        roughness: 0.35,
+        metalness: 0.4,
+        emissive: 0x000000,
+        emissiveIntensity: 0.5,
+      });
+      const seat = new THREE.Mesh(seatGeo, seatMat);
+      seat.position.set(world.x, 0.16, world.z);
+      seat.visible = false;
+      this.scene.add(seat);
+
       const anchor = new CANNON.Body({
         mass: 0,
         type: CANNON.Body.STATIC,
@@ -652,7 +690,36 @@ export class CableGame {
       });
       this.world.addBody(anchor);
 
-      this.pegsByPort.set(port.id, { portId: port.id, world, anchor, socket: rim });
+      this.pegsByPort.set(port.id, { portId: port.id, world, anchor, socket: rim, seat, seatMat });
+    }
+  }
+
+  /**
+   * Colors the seat collar of every occupied socket to match the plug in it
+   * (steel-red for bolted ends), and hides collars of empty sockets. This is
+   * the "plugged-in" cue, refreshed cheaply each frame (grid is small).
+   */
+  private updateSeats(): void {
+    const occupied = new Map<number, { color: number; locked: boolean }>();
+    for (const cable of this.cables) {
+      if (cable.cleared) continue;
+      for (const end of cable.ends) {
+        // The end being dragged isn't seated anywhere yet.
+        if (this.dragEnd === end) continue;
+        occupied.set(end.pegPortId, { color: cable.color, locked: end.locked });
+      }
+    }
+    for (const peg of this.pegsByPort.values()) {
+      const occ = occupied.get(peg.portId);
+      if (!occ) {
+        peg.seat.visible = false;
+        continue;
+      }
+      peg.seat.visible = true;
+      const c = occ.locked ? 0x9aa0ad : occ.color;
+      peg.seatMat.color.setHex(c);
+      peg.seatMat.emissive.setHex(occ.locked ? 0x3a0000 : c);
+      peg.seatMat.emissiveIntensity = occ.locked ? 0.3 : 0.35;
     }
   }
 
@@ -693,11 +760,6 @@ export class CableGame {
       color: 0x3a3f4b,
       roughness: 0.4,
       metalness: 0.7,
-    });
-    this.boltMat = new THREE.MeshStandardMaterial({
-      color: 0x8a8f9c,
-      roughness: 0.35,
-      metalness: 0.9,
     });
     this.twistTex = this.buildTwistTexture();
     this.allCablesMask = 0;
@@ -764,11 +826,13 @@ export class CableGame {
     twist.repeat.set(segCount * 1.3, 3);
     const material = new THREE.MeshStandardMaterial({
       color,
-      roughness: 0.5,
-      metalness: 0.15,
+      roughness: 0.38,
+      metalness: 0.18,
       bumpMap: twist,
       bumpScale: 0.04,
       roughnessMap: twist,
+      emissive: color,
+      emissiveIntensity: 0.14,
     });
     const mesh = new THREE.Mesh(this.buildTubeGeometry(bodies), material);
     mesh.castShadow = true;
@@ -861,11 +925,42 @@ export class CableGame {
     group.add(lip);
 
     if (locked) {
-      const bolt = new THREE.Mesh(
-        new THREE.CylinderGeometry(r * 0.7, r * 0.7, bodyH + 0.06, 6),
-        this.boltMat
+      // A bolted bracket plate over the housing, two red bolt heads, and a red
+      // warning ring — unmistakably different from a live plug.
+      const plate = new THREE.Mesh(
+        new THREE.BoxGeometry(bodyW * 1.15, bodyH * 0.5, bodyLen * 0.7),
+        new THREE.MeshStandardMaterial({ color: 0x6a7080, roughness: 0.4, metalness: 0.9 })
       );
-      group.add(bolt);
+      plate.position.y = bodyH * 0.5;
+      group.add(plate);
+
+      const boltMat = new THREE.MeshStandardMaterial({
+        color: 0xff3b3b,
+        roughness: 0.35,
+        metalness: 0.7,
+        emissive: 0xff2020,
+        emissiveIntensity: 0.55,
+      });
+      const boltGeo = new THREE.CylinderGeometry(r * 0.42, r * 0.42, bodyH * 0.6 + 0.1, 8);
+      for (const dz of [-bodyLen * 0.22, bodyLen * 0.22]) {
+        const bolt = new THREE.Mesh(boltGeo, boltMat);
+        bolt.position.set(0, bodyH * 0.75, dz);
+        group.add(bolt);
+      }
+
+      const ring = new THREE.Mesh(
+        new THREE.TorusGeometry(bodyW * 0.7, r * 0.14, 8, 20),
+        new THREE.MeshStandardMaterial({
+          color: 0xff3b3b,
+          emissive: 0xff2020,
+          emissiveIntensity: 0.6,
+          roughness: 0.5,
+          metalness: 0.3,
+        })
+      );
+      ring.rotation.x = Math.PI / 2;
+      ring.position.y = bodyH * 0.55;
+      group.add(ring);
     }
 
     group.traverse((o) => {
@@ -939,6 +1034,7 @@ export class CableGame {
   private applyBlackout(): void {
     this.ambient.intensity = 0.07;
     this.keyLight.intensity = 0.18;
+    this.hemi.intensity = 0.05;
     this.scene.fog = new THREE.Fog(0x02030a, 12, 34);
 
     const target = new THREE.Object3D();
@@ -960,6 +1056,20 @@ export class CableGame {
     const p = this.lastPlanePoint;
     this.flashlight.position.set(p.x, 9, p.z);
     this.flashTarget.position.set(p.x, 0, p.z);
+  }
+
+  /** Snap-in pop for a seat collar: quick overshoot then settle. */
+  private updateSeatPops(dt: number): void {
+    for (const p of [...this.seatPops]) {
+      p.t += dt / 0.32;
+      if (p.t >= 1) {
+        p.mesh.scale.set(1, 1, 1);
+        this.seatPops = this.seatPops.filter((x) => x !== p);
+        continue;
+      }
+      const s = 1 + 0.55 * Math.sin(p.t * Math.PI); // 1 -> ~1.55 -> 1
+      p.mesh.scale.set(s, 1, s);
+    }
   }
 
   /** Gentle emissive breathing for the golden / live-wire cables. */
@@ -1223,6 +1333,8 @@ export class CableGame {
     const peg = this.pegsByPort.get(targetPort)!;
     end.body.position.set(peg.world.x, PEG_TOP_Y, peg.world.z);
     end.pinConstraint = this.pinEnd(end.body, peg.anchor);
+    // Snap-in pop on the socket collar to sell the "plugged-in" feel.
+    this.seatPops.push({ mesh: peg.seat, t: 0 });
   };
 
   private onResize = (): void => {
@@ -1271,6 +1383,8 @@ export class CableGame {
     this.updateDenyAnims(dt);
     this.updateIntro(dt);
     this.updatePulsers();
+    this.updateSeats();
+    this.updateSeatPops(dt);
     if (this.blackout) this.updateFlashlight();
 
     this.renderer.render(this.scene, this.camera);

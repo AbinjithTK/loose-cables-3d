@@ -1,4 +1,5 @@
 import type { ToolWallet } from './achievements';
+import type { PuzzleDefinition } from './types';
 
 /** Per-level progress record. */
 export type LevelProgress = {
@@ -33,6 +34,8 @@ export type InitResponse = {
   dailyDone: boolean;
   /** The current user's Reddit snoovatar URL, or null if they have none. */
   avatarUrl: string | null;
+  /** Set when this post is a user-generated level; the client boots into it. */
+  ugc: UgcLevel | null;
 };
 
 export type LevelCompleteRequest = {
@@ -103,6 +106,24 @@ export type RosterResponse = {
   type: 'roster';
   /** Other players (self excluded), most-recently-active first. */
   players: RosterEntry[];
+};
+
+/** A user-generated level, stored server-side and attached to its Reddit post. */
+export type UgcLevel = {
+  name: string;
+  creator: string;
+  def: PuzzleDefinition;
+};
+
+export type PublishLevelRequest = {
+  title: string;
+  def: PuzzleDefinition;
+};
+
+export type PublishLevelResponse = {
+  type: 'publish';
+  url: string;
+  postId: string;
 };
 
 export type ErrorResponse = {

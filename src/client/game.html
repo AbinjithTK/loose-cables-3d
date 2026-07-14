@@ -52,6 +52,7 @@
           <div class="home-actions">
             <button id="home-play-btn" class="btn big" type="button">Continue</button>
             <button id="home-daily-btn" class="btn ghost" type="button">Today&apos;s Tangle</button>
+            <button id="home-create-btn" class="btn ghost" type="button">&#128295; Make a Level</button>
             <button id="home-ach-btn" class="btn ghost" type="button">&#127942; Achievements</button>
           </div>
 
@@ -84,6 +85,46 @@
 
         <div class="tower-scroll" id="tower-scroll">
           <div class="tower" id="tower"></div>
+        </div>
+      </div>
+
+      <!-- ============ LEVEL MAKER ============ -->
+      <div id="screen-create" class="screen" hidden>
+        <header class="sub-header">
+          <button id="create-back-btn" class="icon-btn" type="button" aria-label="Back">&#8592;</button>
+          <h1 class="sub-title">Make a Level</h1>
+        </header>
+        <div class="create-body">
+          <p class="create-hint">
+            Roll a tangle you like, test it, then publish it as its own Reddit post for the
+            community to solve.
+          </p>
+
+          <div class="create-field">
+            <span class="create-label">Difficulty</span>
+            <div class="seg" id="create-diff">
+              <button type="button" data-diff="easy">Easy</button>
+              <button type="button" data-diff="medium" class="on">Medium</button>
+              <button type="button" data-diff="hard">Hard</button>
+              <button type="button" data-diff="extreme">Extreme</button>
+              <button type="button" data-diff="nightmare">Evil</button>
+            </div>
+          </div>
+
+          <div class="create-summary" id="create-summary">Roll a tangle to begin</div>
+
+          <div class="create-actions">
+            <button id="create-roll-btn" class="btn ghost" type="button">&#127922; Roll New</button>
+            <button id="create-test-btn" class="btn ghost" type="button">&#9654; Test</button>
+          </div>
+
+          <div class="create-field">
+            <span class="create-label">Title</span>
+            <input id="create-title" type="text" maxlength="40" placeholder="My Nasty Tangle" />
+          </div>
+
+          <button id="create-publish-btn" class="btn big" type="button">&#128228; Publish to Reddit</button>
+          <p class="create-status" id="create-status"></p>
         </div>
       </div>
 
